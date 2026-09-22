@@ -4,6 +4,12 @@ export {
   InMemoryArtifactStore,
 } from "./artifact-store.js";
 export {
+  ConfigError,
+  type ConfigErrorCode,
+  type LoadedWorkflowConfig,
+  loadWorkflowConfig,
+} from "./config.js";
+export {
   type ExecutedStageRecord,
   type ExecuteWorkflowRequest,
   executeWorkflow,

@@ -27,3 +27,4 @@ not yet publish versioned releases.
   corruption, and path-traversal protection.
 - Public `runWorkflow` orchestration across baseline loading, planning, execution, and persistence.
 - Recheck fingerprints before reuse and isolate stage inputs and dependency outputs from mutation.
+- Config-based loading for a sealed TypeScript workflow module and a built package entry point.

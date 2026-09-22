@@ -4,16 +4,22 @@
   "private": true,
   "description": "Dependency-aware incremental execution for deterministic developer workflows.",
   "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
   "packageManager": "pnpm@12.5.1",
   "engines": {
     "node": ">=24.20.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check": "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+    "check": "pnpm lint && pnpm typecheck && pnpm test",
     "format": "biome format --write .",
     "lint": "biome check .",
-    "test": "vitest run",
+    "test": "pnpm build && vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
