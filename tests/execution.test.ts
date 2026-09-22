@@ -225,4 +225,84 @@ describe("workflow execution", () => {
     );
     expect(right).not.toHaveBeenCalled();
   });
+
+  it("isolates dependency and selected-input objects from stage mutation", async () => {
+    const observed: number[] = [];
+    const workflow = await workflowFixture({
+      seed: ({ inputs }) => {
+        const value = inputs["/value"] as { count: number };
+        value.count = 99;
+        return { count: 1 };
+      },
+      left: ({ dependencies }) => {
+        const seed = Object.values(dependencies)[0] as { count: number };
+        seed.count = 42;
+        return { changed: true };
+      },
+      right: ({ dependencies }) => {
+        observed.push((Object.values(dependencies)[0] as { count: number }).count);
+        return { unchanged: true };
+      },
+    });
+    const inputs = { value: { count: 1 } };
+    const plan = await planWorkflow({
+      workflow,
+      inputs,
+      environment: {},
+      baseline: null,
+      invalidate: [],
+    });
+    const result = await executeWorkflow({
+      workflow,
+      plan,
+      inputs,
+      environment: {},
+      artifacts: new InMemoryArtifactStore(),
+    });
+    expect(result.executionStatus).toBe("completed");
+    expect(observed).toEqual([1]);
+    expect(inputs.value.count).toBe(1);
+  });
+
+  it("rechecks watched files before using a planned artifact", async () => {
+    const workflow = await workflowFixture();
+    const store = new InMemoryArtifactStore();
+    const firstPlan = await planWorkflow({
+      workflow,
+      inputs: {},
+      environment: {},
+      baseline: null,
+      invalidate: [],
+    });
+    const first = await executeWorkflow({
+      workflow,
+      plan: firstPlan,
+      inputs: {},
+      environment: {},
+      artifacts: store,
+    });
+    const plan = await planWorkflow({
+      workflow,
+      inputs: {},
+      environment: {},
+      baseline: baselineFrom(first),
+      invalidate: [],
+    });
+    await writeFile(join(workflow.root, "left.ts"), "changed after planning\n", "utf8");
+    const result = await executeWorkflow({
+      workflow,
+      plan,
+      inputs: {},
+      environment: {},
+      artifacts: store,
+    });
+    expect(result.stages.find(({ stageId }) => stageId === "left")).toMatchObject({
+      plannedDecision: "reuse",
+      finalDecision: "execute",
+      decisionReason: "fingerprint_changed",
+    });
+    expect(result.stages.find(({ stageId }) => stageId === "join")?.decisionReason).toBe(
+      "dependency_executed",
+    );
+  });
 });

@@ -26,3 +26,4 @@ not yet publish versioned releases.
 - Atomic local filesystem persistence for artifacts and run manifests, including collision,
   corruption, and path-traversal protection.
 - Public `runWorkflow` orchestration across baseline loading, planning, execution, and persistence.
+- Recheck fingerprints before reuse and isolate stage inputs and dependency outputs from mutation.

@@ -1,7 +1,7 @@
 import type { ArtifactStore } from "./artifact-store.js";
 import { computeStageFingerprint, type FingerprintComponentHashes } from "./fingerprint.js";
 import type { DecisionReason, WorkflowPlan } from "./planning.js";
-import { createArtifact, decodeArtifact } from "./serialization.js";
+import { canonicalizeJson, createArtifact, decodeArtifact } from "./serialization.js";
 import type { BuiltWorkflow, JsonObject, JsonValue, StageDefinition } from "./types.js";
 
 export type StageExecutionStatus =
@@ -92,6 +92,38 @@ export async function executeWorkflow(
     }
 
     if (finalDecision === "reuse") {
+      const dependencyArtifacts = Object.fromEntries(
+        stage.dependencyIds.map((dependencyId) => [
+          dependencyId,
+          required(
+            artifactHashes.get(dependencyId),
+            `Dependency "${dependencyId}" has no artifact.`,
+          ),
+        ]),
+      );
+      const current = await computeStageFingerprint({
+        workflowId: request.workflow.id,
+        workflowRoot: request.workflow.root,
+        stage,
+        runInputs: request.inputs,
+        environment: request.environment,
+        dependencyArtifacts,
+      });
+      if (current.fingerprint !== planned.fingerprint) {
+        finalDecision = "execute";
+        reason = "fingerprint_changed";
+        details = {
+          changedComponents: Object.keys(current.componentHashes)
+            .filter((name) => {
+              const component = name as keyof FingerprintComponentHashes;
+              return current.componentHashes[component] !== planned.componentHashes?.[component];
+            })
+            .sort(),
+        };
+      }
+    }
+
+    if (finalDecision === "reuse") {
       const hash = planned.baselineArtifactHash;
       if (hash !== null) {
         try {
@@ -150,7 +182,9 @@ export async function executeWorkflow(
           Object.fromEntries(
             stage.dependencyIds.map((dependencyId) => [
               dependencyId,
-              required(values.get(dependencyId), `Dependency "${dependencyId}" has no value.`),
+              cloneJson(
+                required(values.get(dependencyId), `Dependency "${dependencyId}" has no value.`),
+              ),
             ]),
           ),
         ),
@@ -163,7 +197,7 @@ export async function executeWorkflow(
       });
       const artifact = createArtifact(result);
       await request.artifacts.put(artifact);
-      values.set(stageId, result);
+      values.set(stageId, decodeArtifact(artifact));
       artifactHashes.set(stageId, artifact.contentHash);
       records.set(
         stageId,
@@ -220,9 +254,13 @@ function projectInputs(inputs: JsonObject, stage: StageDefinition): JsonObject {
   const projected: JsonObject = {};
   for (const pointer of stage.inputPointers) {
     const selected = resolvePointer(inputs, pointer);
-    if (selected.found) projected[pointer] = selected.value;
+    if (selected.found) projected[pointer] = cloneJson(selected.value);
   }
   return projected;
+}
+
+function cloneJson(value: JsonValue): JsonValue {
+  return JSON.parse(canonicalizeJson(value)) as JsonValue;
 }
 
 function resolvePointer(
