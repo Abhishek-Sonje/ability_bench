@@ -17,6 +17,7 @@ not yet publish versioned releases.
 - Reject array subclasses and non-enumerable array elements at the canonical JSON boundary.
 - Fail stages whose declared fingerprint inputs change during their callback, preventing an unsafe baseline artifact.
 - Validate cache-policy combinations at workflow sealing for JavaScript callers as well as TypeScript callers.
+- Expand branch-and-join invalidation tests and document the remaining Phase 0 proof gates.
 
 ### Added
 

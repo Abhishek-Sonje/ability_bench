@@ -14,6 +14,7 @@ Phase 0 is under active development. Its execution contract and current SDK usag
 - [Phase 0 execution contract](./execution-contract.md)
 - [Phase 0 storage guarantees](./docs/phase-0-storage.md)
 - [Phase 0 usage](./docs/phase-0-usage.md)
+- [Phase 0 verification and remaining gates](./docs/phase-0-verification.md)
 
 AbilityBench is not ready for production use.
 

@@ -18,7 +18,12 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
 });
 
-async function fixture(cacheRight = true): Promise<BuiltWorkflow> {
+async function fixture(
+  cacheRight = true,
+  volatileRight = false,
+  rightInputs: readonly string[] = [],
+  rightEnv: readonly string[] = [],
+): Promise<BuiltWorkflow> {
   const root = await mkdtemp(join(tmpdir(), "abilitybench-plan-"));
   roots.push(root);
   for (const id of ["seed", "left", "right", "join", "report", "independent"]) {
@@ -31,9 +36,13 @@ async function fixture(cacheRight = true): Promise<BuiltWorkflow> {
       dependsOn,
       implementation: `${id}-v1`,
       watch: [`${id}.ts`],
-      inputs: [],
-      env: [],
-      ...(cache ? { cache: true as const } : { cache: false as const }),
+      inputs: id === "right" ? rightInputs : [],
+      env: id === "right" ? rightEnv : [],
+      ...(id === "right" && volatileRight
+        ? { volatile: true as const, cache: false as const }
+        : cache
+          ? { cache: true as const }
+          : { cache: false as const }),
       run: () => null,
     });
   add("seed", []);
@@ -159,6 +168,67 @@ describe("conservative workflow planning", () => {
       right: ["execute", "cache_disabled"],
       join: ["execute", "dependency_executed"],
       independent: ["reuse", "fingerprint_match"],
+    });
+  });
+
+  it("explains volatile execution distinctly from disabled caching", async () => {
+    const workflow = await fixture(false, true);
+    const baseline = await baselineFor(workflow);
+    const plan = await planWorkflow({
+      workflow,
+      inputs: {},
+      environment: {},
+      baseline,
+      invalidate: [],
+    });
+    expect(summary(plan)).toMatchObject({
+      left: ["reuse", "fingerprint_match"],
+      right: ["execute", "volatile_stage"],
+      join: ["execute", "dependency_executed"],
+      independent: ["reuse", "fingerprint_match"],
+    });
+  });
+
+  it("invalidates only the branch selecting a changed input", async () => {
+    const workflow = await fixture(true, false, ["/region"]);
+    const baseline = await baselineFor(workflow);
+    const plan = await planWorkflow({
+      workflow,
+      inputs: { region: "west", ignored: 1 },
+      environment: {},
+      baseline,
+      invalidate: [],
+    });
+    expect(summary(plan)).toMatchObject({
+      seed: ["reuse", "fingerprint_match"],
+      left: ["reuse", "fingerprint_match"],
+      right: ["execute", "fingerprint_changed"],
+      join: ["execute", "dependency_executed"],
+      independent: ["reuse", "fingerprint_match"],
+    });
+    expect(plan.decisions.find(({ stageId }) => stageId === "right")?.details).toEqual({
+      changedComponents: ["selectedInputs"],
+    });
+  });
+
+  it("distinguishes missing and empty declared environment values", async () => {
+    const workflow = await fixture(true, false, [], ["RIGHT_RULESET"]);
+    const baseline = await baselineFor(workflow);
+    const plan = await planWorkflow({
+      workflow,
+      inputs: {},
+      environment: { RIGHT_RULESET: "" },
+      baseline,
+      invalidate: [],
+    });
+    expect(summary(plan)).toMatchObject({
+      left: ["reuse", "fingerprint_match"],
+      right: ["execute", "fingerprint_changed"],
+      join: ["execute", "dependency_executed"],
+      independent: ["reuse", "fingerprint_match"],
+    });
+    expect(plan.decisions.find(({ stageId }) => stageId === "right")?.details).toEqual({
+      changedComponents: ["environment"],
     });
   });
 

@@ -187,6 +187,10 @@ describe("workflow execution", () => {
       report: ["succeeded", "dependency_executed"],
       z_independent: ["reused", "fingerprint_match"],
     });
+    expect(result.stages.find(({ stageId }) => stageId === "left")?.outputArtifactHash).toBe(
+      leftHash,
+    );
+    expect(result.stages.find(({ stageId }) => stageId === "join")?.finalDecision).toBe("execute");
   });
 
   it("records failures separately from evaluation and stops remaining work", async () => {
