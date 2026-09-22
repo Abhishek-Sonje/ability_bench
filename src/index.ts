@@ -49,6 +49,13 @@ export {
   verifyRunManifest,
 } from "./run-manifest.js";
 export {
+  RunWorkflowError,
+  type RunWorkflowErrorCode,
+  type RunWorkflowOptions,
+  type RunWorkflowResult,
+  runWorkflow,
+} from "./runner.js";
+export {
   type ArtifactEnvelope,
   canonicalizeJson,
   createArtifact,

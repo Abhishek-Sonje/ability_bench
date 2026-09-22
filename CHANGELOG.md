@@ -25,3 +25,4 @@ not yet publish versioned releases.
   conversion.
 - Atomic local filesystem persistence for artifacts and run manifests, including collision,
   corruption, and path-traversal protection.
+- Public `runWorkflow` orchestration across baseline loading, planning, execution, and persistence.

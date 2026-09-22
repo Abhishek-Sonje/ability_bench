@@ -16,6 +16,44 @@ Phase 0 is under active development. The public contract is specified before imp
 
 AbilityBench is not ready for production use.
 
+## Phase 0 API
+
+Declare every stage before running the workflow. Stage callbacks receive only their declared
+direct dependencies and selected external inputs.
+
+```ts
+import { defineWorkflow, runWorkflow } from "abilitybench";
+
+const workflow = defineWorkflow({ id: "example", root: import.meta.dirname })
+  .stage({
+    id: "source",
+    dependsOn: [],
+    implementation: "source-v1",
+    watch: ["./workflow.ts"],
+    inputs: ["/value"],
+    env: [],
+    cache: true,
+    run: ({ inputs }) => ({ value: inputs["/value"] ?? null }),
+  })
+  .build();
+
+const baseline = await runWorkflow(workflow, {
+  inputs: { value: 42 },
+  baseline: null,
+});
+
+const candidate = await runWorkflow(workflow, {
+  inputs: { value: 42 },
+  baseline: { runId: baseline.manifest.id },
+});
+```
+
+The caller chooses one baseline explicitly. Each run is stored under the workflow root in
+`.abilitybench/` by default. `candidate.plan.decisions` explains every reuse or execution.
+
+Cacheable stages must behave as pure functions of their declared dependencies, selected inputs,
+environment variables, and watched files. AbilityBench cannot detect an undeclared influence.
+
 ## Development
 
 Requirements:
