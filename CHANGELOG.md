@@ -19,3 +19,5 @@ not yet publish versioned releases.
   and exact watched-file bytes.
 - Conservative single-baseline planning with stable decision reasons, branch-local invalidation,
   and component-level change explanations.
+- Sequential stage execution with explicit dependency values, verified artifact reuse, runtime
+  cache-miss fallback, and separate execution and evaluation statuses.

@@ -1,4 +1,17 @@
 export {
+  ArtifactCollisionError,
+  type ArtifactStore,
+  InMemoryArtifactStore,
+} from "./artifact-store.js";
+export {
+  type ExecutedStageRecord,
+  type ExecuteWorkflowRequest,
+  executeWorkflow,
+  type SerializedExecutionError,
+  type StageExecutionStatus,
+  type WorkflowExecutionResult,
+} from "./execution.js";
+export {
   computeStageFingerprint,
   type FingerprintComponentHashes,
   FingerprintInputError,

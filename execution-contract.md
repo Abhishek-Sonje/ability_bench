@@ -128,7 +128,7 @@ const workflow = defineWorkflow({
     env: [],
     cache: true,
     run: async ({ dependencies, inputs }) => {
-      return createSeed(inputs.dataset);
+      return createSeed(inputs["/dataset"]);
     }
   })
   .stage({
@@ -140,7 +140,7 @@ const workflow = defineWorkflow({
     env: ["LEFT_RULESET"],
     cache: true,
     run: async ({ dependencies, inputs, env }) => {
-      return runLeft(dependencies.seed, inputs.region, env.LEFT_RULESET);
+      return runLeft(dependencies.seed, inputs["/region"], env.LEFT_RULESET);
     }
   })
   .stage({
@@ -180,7 +180,9 @@ Required behavioral properties:
 - The workflow is fully declared and sealed before `runWorkflow` starts.
 - `run` receives a `dependencies` object containing exactly the declared direct dependencies, keyed by stage ID.
 - A stage does not receive a general workflow-result registry.
-- `inputs` contains only values selected by the stage's JSON Pointer selectors.
+- `inputs` contains only values selected by the stage's JSON Pointer selectors. Phase 0 keys each
+  value by its exact pointer, such as `inputs["/dataset"]`; a missing selection is omitted. This
+  avoids collisions between nested selectors. Named input aliases are deferred.
 - `env` contains only names declared by the stage.
 - No ambient AbilityBench API exposes undeclared stage outputs.
 - A stage may still access ambient Node.js state directly, but doing so violates the cacheability contract unless the stage is non-cacheable.
@@ -370,7 +372,7 @@ The run accepts one strict JSON input object. Each stage declares JSON Pointer s
 - `{ "state": "present", "value": ... }`
 - `{ "state": "missing" }`
 
-Pointers are deduplicated and sorted. Selecting a parent and its child is allowed but discouraged because it duplicates fingerprint material. The complete selected values are passed to the function through `inputs` in a documented projection shape.
+Pointers are deduplicated and sorted. Selecting a parent and its child is allowed but discouraged because it duplicates fingerprint material. The complete selected values are passed to the function through `inputs`, keyed by their exact JSON Pointer. Missing selections are omitted.
 
 An undeclared run input does not affect that stage. Reading it through another channel violates the cacheability contract.
 
