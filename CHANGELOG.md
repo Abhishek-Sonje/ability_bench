@@ -11,4 +11,5 @@ not yet publish versioned releases.
 
 - Phase 0 execution contract.
 - TypeScript project scaffold and contributor workflow.
-
+- Immutable workflow declaration with validation, cycle detection, and deterministic topological
+  ordering.
