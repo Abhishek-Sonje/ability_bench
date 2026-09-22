@@ -1,3 +1,12 @@
+export {
+  type ArtifactEnvelope,
+  canonicalizeJson,
+  createArtifact,
+  decodeArtifact,
+  encodeCanonicalJson,
+  SerializationError,
+  type SerializationErrorCode,
+} from "./serialization.js";
 export type {
   BuiltWorkflow,
   JsonObject,

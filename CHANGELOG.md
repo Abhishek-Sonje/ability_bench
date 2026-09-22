@@ -13,3 +13,5 @@ not yet publish versioned releases.
 - TypeScript project scaffold and contributor workflow.
 - Immutable workflow declaration with validation, cycle detection, and deterministic topological
   ordering.
+- Strict canonical JSON artifacts with deterministic SHA-256 identities and integrity-checked
+  decoding.
