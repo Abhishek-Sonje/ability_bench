@@ -23,3 +23,5 @@ not yet publish versioned releases.
   cache-miss fallback, and separate execution and evaluation statuses.
 - Immutable content-addressed run manifests with tamper detection and artifact-verified baseline
   conversion.
+- Atomic local filesystem persistence for artifacts and run manifests, including collision,
+  corruption, and path-traversal protection.

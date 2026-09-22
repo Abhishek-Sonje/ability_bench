@@ -12,6 +12,12 @@ export {
   type WorkflowExecutionResult,
 } from "./execution.js";
 export {
+  FileArtifactStore,
+  FileRunManifestStore,
+  PersistenceError,
+  type PersistenceErrorCode,
+} from "./filesystem-store.js";
+export {
   computeStageFingerprint,
   type FingerprintComponentHashes,
   FingerprintInputError,

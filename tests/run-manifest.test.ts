@@ -99,6 +99,9 @@ describe("content-addressed run manifests", () => {
     expect(() => verifyRunManifest({ ...manifest, id: "run_replaced" })).toThrowError(
       expect.objectContaining({ code: "invalid_run_id" }),
     );
+    expect(() =>
+      verifyRunManifest({ ...manifest, unverified: true } as typeof manifest),
+    ).toThrowError(expect.objectContaining({ code: "invalid_manifest_hash" }));
   });
 
   it("re-verifies referenced artifacts when creating a baseline", async () => {

@@ -12,6 +12,7 @@ Phase 0 is under active development. The public contract is specified before imp
 
 - [Product plan](./plan.md)
 - [Phase 0 execution contract](./execution-contract.md)
+- [Phase 0 storage guarantees](./docs/phase-0-storage.md)
 
 AbilityBench is not ready for production use.
 
@@ -29,4 +30,3 @@ pnpm check
 ```
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for repository conventions and quality gates.
-

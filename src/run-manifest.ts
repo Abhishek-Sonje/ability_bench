@@ -127,6 +127,46 @@ export function finalizeRunManifest(request: FinalizeRunRequest): FinalizedRunMa
 }
 
 export function verifyRunManifest(manifest: FinalizedRunManifest): void {
+  assertExactKeys(
+    manifest,
+    [
+      "baselineManifestHash",
+      "baselineRunId",
+      "completedAt",
+      "createdAt",
+      "evaluationStatus",
+      "executionStatus",
+      "id",
+      "manifestHash",
+      "schemaVersion",
+      "stages",
+      "workflowId",
+    ],
+    "run manifest",
+  );
+  if (!Array.isArray(manifest.stages)) {
+    throw new RunManifestError("invalid_manifest_hash", "Run manifest stages must be an array.");
+  }
+  for (const stage of manifest.stages) {
+    assertExactKeys(
+      stage,
+      [
+        "componentHashes",
+        "decisionDetails",
+        "decisionReason",
+        "dependencyIds",
+        "error",
+        "evaluationStatus",
+        "executionStatus",
+        "finalDecision",
+        "fingerprint",
+        "outputArtifactHash",
+        "plannedDecision",
+        "stageId",
+      ],
+      "run manifest stage",
+    );
+  }
   const body = manifestBody(manifest);
   const expectedHash = hashManifestBody(body as unknown as JsonValue);
   if (manifest.manifestHash !== expectedHash) {
@@ -250,4 +290,21 @@ function emptyComponentHashes(): FingerprintComponentHashes {
     selectedInputs: "",
     watchedFiles: "",
   };
+}
+
+function assertExactKeys(value: unknown, expected: readonly string[], label: string): void {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new RunManifestError("invalid_manifest_hash", `${label} must be an object.`);
+  }
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  if (
+    actual.length !== sortedExpected.length ||
+    actual.some((key, index) => key !== sortedExpected[index])
+  ) {
+    throw new RunManifestError(
+      "invalid_manifest_hash",
+      `${label} contains missing or unsupported fields.`,
+    );
+  }
 }
