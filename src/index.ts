@@ -1,4 +1,11 @@
 export {
+  computeStageFingerprint,
+  FingerprintInputError,
+  type FingerprintInputErrorCode,
+  type StageFingerprintRequest,
+  type StageFingerprintResult,
+} from "./fingerprint.js";
+export {
   type ArtifactEnvelope,
   canonicalizeJson,
   createArtifact,

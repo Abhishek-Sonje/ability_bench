@@ -15,3 +15,5 @@ not yet publish versioned releases.
   ordering.
 - Strict canonical JSON artifacts with deterministic SHA-256 identities and integrity-checked
   decoding.
+- Canonical stage fingerprints covering dependency artifacts, selected inputs, environment state,
+  and exact watched-file bytes.
