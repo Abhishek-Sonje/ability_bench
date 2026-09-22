@@ -120,6 +120,15 @@ describe("workflow declaration", () => {
       .stage(stage("random", [], { cache: false, volatile: true, watch: [] }))
       .build();
     expect(valid.stages.map(({ cachePolicy }) => cachePolicy)).toEqual(["disabled", "volatile"]);
+
+    const conflicting = defineWorkflow({ id: "conflicting-cache", root }).stage(
+      stage("unsafe", [], { cache: true, volatile: true } as unknown as Partial<StageDeclaration>),
+    );
+    expect(() => conflicting.build()).toThrowError(
+      expect.objectContaining<Partial<WorkflowValidationError>>({
+        issues: [expect.objectContaining({ code: "invalid_cache_policy" })],
+      }),
+    );
   });
 
   it("rejects paths outside the workflow root", () => {

@@ -21,6 +21,7 @@ export type WorkflowValidationCode =
   | "duplicate_stage"
   | "duplicate_watch"
   | "empty_implementation"
+  | "invalid_cache_policy"
   | "invalid_environment_name"
   | "invalid_input_pointer"
   | "invalid_stage_id"
@@ -148,6 +149,19 @@ function normalizeStage(
     );
   }
 
+  if (
+    !(
+      (declaration.cache === true &&
+        (declaration.volatile === undefined || declaration.volatile === false)) ||
+      (declaration.cache === false &&
+        (declaration.volatile === undefined ||
+          declaration.volatile === false ||
+          declaration.volatile === true)) ||
+      (declaration.cache === undefined && declaration.volatile === true)
+    )
+  ) {
+    issues.push(issue("invalid_cache_policy", `Stage "${id}" has an invalid cache policy.`, id));
+  }
   const cachePolicy = getCachePolicy(declaration);
   if (cachePolicy === "cacheable" && declaration.watch.length === 0) {
     issues.push(issue("missing_watch", `Cacheable stage "${id}" must watch a source file.`, id));

@@ -16,6 +16,7 @@ not yet publish versioned releases.
 - Record a failed run when a watched path becomes invalid after planning, rather than rejecting without a run result.
 - Reject array subclasses and non-enumerable array elements at the canonical JSON boundary.
 - Fail stages whose declared fingerprint inputs change during their callback, preventing an unsafe baseline artifact.
+- Validate cache-policy combinations at workflow sealing for JavaScript callers as well as TypeScript callers.
 
 ### Added
 
