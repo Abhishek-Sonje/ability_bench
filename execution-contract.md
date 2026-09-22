@@ -435,7 +435,7 @@ The planner computes fingerprints immediately only for stages whose dependencies
 11. A completed candidate is a new immutable snapshot and may be explicitly selected as a later baseline.
 12. With `baseline: null`, every stage executes with reason `no_baseline`.
 
-Because a manifest changes while a run is in progress, active runs use a separate temporary execution ID and manifest. Only a successfully finalized manifest receives a content-addressed run ID and becomes baseline-eligible. Failed and cancelled run records may be retained under non-baseline diagnostic IDs.
+An in-progress run has no published manifest ID. Finalization assigns a content-addressed run ID to completed or failed executions. Baseline eligibility is checked separately: a failed run is never eligible, even though its diagnostic manifest has an immutable ID. Cancellation is not implemented in Phase 0.
 
 This creates a linear parent link per run while permitting a history tree when several candidates use the same baseline.
 

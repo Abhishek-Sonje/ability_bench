@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -303,6 +303,51 @@ describe("workflow execution", () => {
     });
     expect(result.stages.find(({ stageId }) => stageId === "join")?.decisionReason).toBe(
       "dependency_executed",
+    );
+  });
+
+  it("records a late invalid watched path as execution failure", async () => {
+    const workflow = await workflowFixture();
+    const store = new InMemoryArtifactStore();
+    const firstPlan = await planWorkflow({
+      workflow,
+      inputs: {},
+      environment: {},
+      baseline: null,
+      invalidate: [],
+    });
+    const first = await executeWorkflow({
+      workflow,
+      plan: firstPlan,
+      inputs: {},
+      environment: {},
+      artifacts: store,
+    });
+    const plan = await planWorkflow({
+      workflow,
+      inputs: {},
+      environment: {},
+      baseline: baselineFrom(first),
+      invalidate: [],
+    });
+    await rm(join(workflow.root, "left.ts"));
+    await mkdir(join(workflow.root, "left.ts"));
+    const result = await executeWorkflow({
+      workflow,
+      plan,
+      inputs: {},
+      environment: {},
+      artifacts: store,
+    });
+    expect(result.executionStatus).toBe("failed");
+    expect(result.stages.find(({ stageId }) => stageId === "left")).toMatchObject({
+      plannedDecision: "reuse",
+      finalDecision: "execute",
+      executionStatus: "failed",
+      error: { name: "FingerprintInputError" },
+    });
+    expect(result.stages.find(({ stageId }) => stageId === "join")?.executionStatus).toBe(
+      "skipped_dependency_failed",
     );
   });
 });

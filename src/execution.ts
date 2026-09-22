@@ -92,34 +92,55 @@ export async function executeWorkflow(
     }
 
     if (finalDecision === "reuse") {
-      const dependencyArtifacts = Object.fromEntries(
-        stage.dependencyIds.map((dependencyId) => [
-          dependencyId,
-          required(
-            artifactHashes.get(dependencyId),
-            `Dependency "${dependencyId}" has no artifact.`,
-          ),
-        ]),
-      );
-      const current = await computeStageFingerprint({
-        workflowId: request.workflow.id,
-        workflowRoot: request.workflow.root,
-        stage,
-        runInputs: request.inputs,
-        environment: request.environment,
-        dependencyArtifacts,
-      });
-      if (current.fingerprint !== planned.fingerprint) {
-        finalDecision = "execute";
-        reason = "fingerprint_changed";
-        details = {
-          changedComponents: Object.keys(current.componentHashes)
-            .filter((name) => {
-              const component = name as keyof FingerprintComponentHashes;
-              return current.componentHashes[component] !== planned.componentHashes?.[component];
-            })
-            .sort(),
-        };
+      try {
+        const dependencyArtifacts = Object.fromEntries(
+          stage.dependencyIds.map((dependencyId) => [
+            dependencyId,
+            required(
+              artifactHashes.get(dependencyId),
+              `Dependency "${dependencyId}" has no artifact.`,
+            ),
+          ]),
+        );
+        const current = await computeStageFingerprint({
+          workflowId: request.workflow.id,
+          workflowRoot: request.workflow.root,
+          stage,
+          runInputs: request.inputs,
+          environment: request.environment,
+          dependencyArtifacts,
+        });
+        if (current.fingerprint !== planned.fingerprint) {
+          finalDecision = "execute";
+          reason = "fingerprint_changed";
+          details = {
+            changedComponents: Object.keys(current.componentHashes)
+              .filter((name) => {
+                const component = name as keyof FingerprintComponentHashes;
+                return current.componentHashes[component] !== planned.componentHashes?.[component];
+              })
+              .sort(),
+          };
+        }
+      } catch (error: unknown) {
+        failedStageId = stageId;
+        records.set(
+          stageId,
+          Object.freeze({
+            stageId,
+            plannedDecision: planned.decision,
+            finalDecision: "execute",
+            decisionReason: reason,
+            decisionDetails: details,
+            executionStatus: "failed",
+            evaluationStatus: "not_run",
+            fingerprint: null,
+            componentHashes: null,
+            outputArtifactHash: null,
+            error: serializeError(error),
+          }),
+        );
+        continue;
       }
     }
 

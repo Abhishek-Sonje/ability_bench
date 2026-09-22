@@ -13,6 +13,7 @@ not yet publish versioned releases.
 - Snapshot run inputs and declared environment values; isolate stage data from callback mutations.
 - Recheck reuse before artifact load and reject noncanonical persisted JSON.
 - Reject stages that watch the configured artifact storage directory.
+- Record a failed run when a watched path becomes invalid after planning, rather than rejecting without a run result.
 
 ### Added
 
