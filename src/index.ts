@@ -1,7 +1,9 @@
 export {
   computeStageFingerprint,
+  type FingerprintComponentHashes,
   FingerprintInputError,
   type FingerprintInputErrorCode,
+  type StageFingerprintManifest,
   type StageFingerprintRequest,
   type StageFingerprintResult,
 } from "./fingerprint.js";

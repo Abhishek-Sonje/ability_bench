@@ -87,8 +87,8 @@ describe("stage fingerprints", () => {
     await writeFile(join(root, "stage.ts"), "export const value = 2;\n", "utf8");
     const second = await fingerprint(root);
     expect(second.fingerprint).not.toBe(first.fingerprint);
-    expect(second.componentHashes["watchedFiles"]).not.toBe(first.componentHashes["watchedFiles"]);
-    expect(second.componentHashes["selectedInputs"]).toBe(first.componentHashes["selectedInputs"]);
+    expect(second.componentHashes.watchedFiles).not.toBe(first.componentHashes.watchedFiles);
+    expect(second.componentHashes.selectedInputs).toBe(first.componentHashes.selectedInputs);
   });
 
   it("distinguishes missing, empty, and populated environment values without persisting values", async () => {
@@ -113,7 +113,7 @@ describe("stage fingerprints", () => {
   it("represents a missing watched file explicitly", async () => {
     const root = await fixtureRoot();
     const result = await fingerprint(root, stage(root, { watch: ["missing.ts"] }));
-    expect(result.manifest["watchedFiles"]).toEqual([{ path: "missing.ts", state: "missing" }]);
+    expect(result.manifest.watchedFiles).toEqual([{ path: "missing.ts", state: "missing" }]);
   });
 
   it("fails when a dependency artifact identity is absent", async () => {

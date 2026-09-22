@@ -37,8 +37,22 @@ export interface StageFingerprintRequest {
 
 export interface StageFingerprintResult {
   readonly fingerprint: string;
-  readonly manifest: JsonObject;
-  readonly componentHashes: Readonly<Record<string, string>>;
+  readonly manifest: StageFingerprintManifest;
+  readonly componentHashes: FingerprintComponentHashes;
+}
+
+export interface FingerprintComponentHashes {
+  readonly cachePolicy: string;
+  readonly codec: string;
+  readonly dependencies: string;
+  readonly environment: string;
+  readonly implementation: string;
+  readonly selectedInputs: string;
+  readonly watchedFiles: string;
+}
+
+export interface StageFingerprintManifest extends JsonObject {
+  readonly watchedFiles: JsonValue[];
 }
 
 export async function computeStageFingerprint(
@@ -103,11 +117,11 @@ export async function computeStageFingerprint(
 
   const componentHashes = Object.fromEntries(
     Object.entries(components).map(([name, value]) => [name, hashCanonical(value)]),
-  );
+  ) as unknown as FingerprintComponentHashes;
 
   return Object.freeze({
     fingerprint: hashCanonical(manifest),
-    manifest: Object.freeze(manifest),
+    manifest: Object.freeze(manifest) as StageFingerprintManifest,
     componentHashes: Object.freeze(componentHashes),
   });
 }
