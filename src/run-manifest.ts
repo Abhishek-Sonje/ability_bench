@@ -123,7 +123,7 @@ export function finalizeRunManifest(request: FinalizeRunRequest): FinalizedRunMa
     ...body,
   } as FinalizedRunManifest;
   verifyRunManifest(manifest);
-  return deepFreezeManifest(manifest);
+  return freezeRunManifest(manifest);
 }
 
 export function verifyRunManifest(manifest: FinalizedRunManifest): void {
@@ -268,16 +268,15 @@ function cloneJson(value: JsonObject): JsonObject {
   return JSON.parse(canonicalizeJson(value)) as JsonObject;
 }
 
-function deepFreezeManifest(manifest: FinalizedRunManifest): FinalizedRunManifest {
-  for (const stage of manifest.stages) {
-    Object.freeze(stage.dependencyIds);
-    Object.freeze(stage.decisionDetails);
-    if (stage.componentHashes !== null) Object.freeze(stage.componentHashes);
-    if (stage.error !== null) Object.freeze(stage.error);
-    Object.freeze(stage);
-  }
-  Object.freeze(manifest.stages);
-  return Object.freeze(manifest);
+export function freezeRunManifest(manifest: FinalizedRunManifest): FinalizedRunManifest {
+  deepFreeze(manifest);
+  return manifest;
+}
+
+function deepFreeze(value: unknown): void {
+  if (value === null || typeof value !== "object") return;
+  for (const child of Object.values(value)) deepFreeze(child);
+  Object.freeze(value);
 }
 
 function emptyComponentHashes(): FingerprintComponentHashes {

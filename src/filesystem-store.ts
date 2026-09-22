@@ -3,7 +3,7 @@ import { link, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import type { ArtifactStore } from "./artifact-store.js";
-import { type FinalizedRunManifest, verifyRunManifest } from "./run-manifest.js";
+import { type FinalizedRunManifest, freezeRunManifest, verifyRunManifest } from "./run-manifest.js";
 import { type ArtifactEnvelope, canonicalizeJson, decodeArtifact } from "./serialization.js";
 
 const ARTIFACT_HASH_PATTERN = /^sha256:([a-f0-9]{64})$/;
@@ -113,6 +113,9 @@ export class FileRunManifestStore {
       const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
       manifest = JSON.parse(text) as FinalizedRunManifest;
       verifyRunManifest(manifest);
+      if (canonicalizeJson(manifest) !== text) {
+        throw new TypeError("Run manifest is not canonical JSON.");
+      }
     } catch (error: unknown) {
       throw new PersistenceError(
         "corrupt_manifest",
@@ -126,7 +129,7 @@ export class FileRunManifestStore {
         `Run manifest at "${runId}" identifies itself as "${manifest.id}".`,
       );
     }
-    return freezeLoadedManifest(manifest);
+    return freezeRunManifest(manifest);
   }
 
   async put(manifest: FinalizedRunManifest): Promise<void> {
@@ -197,16 +200,4 @@ function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
-}
-
-function freezeLoadedManifest(manifest: FinalizedRunManifest): FinalizedRunManifest {
-  for (const stage of manifest.stages) {
-    Object.freeze(stage.dependencyIds);
-    Object.freeze(stage.decisionDetails);
-    if (stage.componentHashes !== null) Object.freeze(stage.componentHashes);
-    if (stage.error !== null) Object.freeze(stage.error);
-    Object.freeze(stage);
-  }
-  Object.freeze(manifest.stages);
-  return Object.freeze(manifest);
 }

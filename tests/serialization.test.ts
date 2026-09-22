@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -85,5 +87,22 @@ describe("artifact envelopes", () => {
     };
 
     expect(() => decodeArtifact(corrupted)).toThrow("Artifact content hash does not match");
+  });
+
+  it("rejects noncanonical JSON even when its byte hash matches", () => {
+    const payload = new TextEncoder().encode('{"b":2,"a":1}');
+    const digest = createHash("sha256")
+      .update("abilitybench/artifact/v1\0")
+      .update(payload)
+      .digest("hex");
+    expect(() =>
+      decodeArtifact({
+        schemaVersion: "phase0-artifact-v1",
+        codec: "canonical-json-v1",
+        contentHash: `sha256:${digest}`,
+        byteLength: payload.byteLength,
+        payload,
+      }),
+    ).toThrow("not canonical JSON");
   });
 });

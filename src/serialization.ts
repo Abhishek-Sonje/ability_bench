@@ -70,10 +70,11 @@ export function decodeArtifact(artifact: ArtifactEnvelope): JsonValue {
   if (`sha256:${actual}` !== artifact.contentHash) {
     throw new TypeError("Artifact content hash does not match its payload.");
   }
-  const decoded: unknown = JSON.parse(
-    new TextDecoder("utf-8", { fatal: true }).decode(artifact.payload),
-  );
-  canonicalizeJson(decoded);
+  const text = new TextDecoder("utf-8", { fatal: true }).decode(artifact.payload);
+  const decoded: unknown = JSON.parse(text);
+  if (canonicalizeJson(decoded) !== text) {
+    throw new TypeError("Artifact payload is not canonical JSON.");
+  }
   return decoded as JsonValue;
 }
 

@@ -80,6 +80,9 @@ describe("runWorkflow", () => {
       environment: {},
     });
     expect(calls).toEqual(["left", "join", "report"]);
+    const joinStage = candidate.manifest.stages.find(({ stageId }) => stageId === "join");
+    expect(Object.isFrozen(joinStage?.decisionDetails)).toBe(true);
+    expect(Object.isFrozen(Object.values(joinStage?.decisionDetails ?? {})[0])).toBe(true);
     expect(
       Object.fromEntries(
         candidate.execution.stages.map(({ stageId, decisionReason }) => [stageId, decisionReason]),
@@ -103,6 +106,14 @@ describe("runWorkflow", () => {
         environment: {},
       }),
     ).rejects.toMatchObject({ code: "baseline_not_found" });
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects a storage path outside the workflow root before execution", async () => {
+    const { workflow, calls } = await fixture();
+    await expect(
+      runWorkflow(workflow, { inputs: {}, baseline: null, storageDir: "../outside" }),
+    ).rejects.toMatchObject({ code: "storage_path_escaped" });
     expect(calls).toEqual([]);
   });
 });

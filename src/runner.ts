@@ -1,7 +1,6 @@
-import { resolve } from "node:path";
-
 import { executeWorkflow, type WorkflowExecutionResult } from "./execution.js";
 import { FileArtifactStore, FileRunManifestStore } from "./filesystem-store.js";
+import { PathEscapeError, resolveContainedPath } from "./path-safety.js";
 import { planWorkflow, type WorkflowPlan } from "./planning.js";
 import {
   type FinalizedRunManifest,
@@ -27,7 +26,7 @@ export interface RunWorkflowResult {
   readonly storageDir: string;
 }
 
-export type RunWorkflowErrorCode = "baseline_not_found" | "invalid_inputs";
+export type RunWorkflowErrorCode = "baseline_not_found" | "invalid_inputs" | "storage_path_escaped";
 
 export class RunWorkflowError extends Error {
   constructor(
@@ -44,15 +43,24 @@ export async function runWorkflow(
   workflow: BuiltWorkflow,
   options: RunWorkflowOptions,
 ): Promise<RunWorkflowResult> {
+  let inputs: JsonObject;
   try {
-    canonicalizeJson(options.inputs);
+    inputs = JSON.parse(canonicalizeJson(options.inputs)) as JsonObject;
   } catch (error: unknown) {
     throw new RunWorkflowError(
       "invalid_inputs",
       `Run inputs must satisfy canonical JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  const storageDir = resolve(workflow.root, options.storageDir ?? ".abilitybench");
+  let storageDir: string;
+  try {
+    storageDir = await resolveContainedPath(workflow.root, options.storageDir ?? ".abilitybench");
+  } catch (error: unknown) {
+    if (error instanceof PathEscapeError) {
+      throw new RunWorkflowError("storage_path_escaped", error.message);
+    }
+    throw error;
+  }
   const artifacts = new FileArtifactStore(storageDir);
   const manifests = new FileRunManifestStore(storageDir);
   const baselineManifest =
@@ -67,10 +75,17 @@ export async function runWorkflow(
     baselineManifest === null || baselineManifest === undefined
       ? null
       : await manifestToBaseline(baselineManifest, artifacts);
-  const environment = options.environment ?? process.env;
+  const sourceEnvironment = options.environment ?? process.env;
+  const environment = Object.freeze(
+    Object.fromEntries(
+      [...new Set(workflow.stages.flatMap((stage) => stage.environmentNames))]
+        .sort()
+        .map((name) => [name, sourceEnvironment[name]]),
+    ),
+  );
   const plan = await planWorkflow({
     workflow,
-    inputs: options.inputs,
+    inputs,
     environment,
     baseline,
     invalidate: options.invalidate ?? [],
@@ -79,7 +94,7 @@ export async function runWorkflow(
   const execution = await executeWorkflow({
     workflow,
     plan,
-    inputs: options.inputs,
+    inputs,
     environment,
     artifacts,
   });

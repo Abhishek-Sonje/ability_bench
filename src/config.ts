@@ -1,7 +1,8 @@
 import { stat } from "node:fs/promises";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { PathEscapeError, resolveContainedPath } from "./path-safety.js";
 import type { BuiltWorkflow } from "./types.js";
 import { ABILITYBENCH_CONTRACT_VERSION } from "./version.js";
 
@@ -52,8 +53,15 @@ export async function loadWorkflowConfig(
     );
   }
 
-  const workflowPath = containedPath(configDirectory, workflowSetting);
-  const storageDir = containedPath(configDirectory, storageSetting ?? ".abilitybench");
+  let workflowPath: string;
+  let storageDir: string;
+  try {
+    workflowPath = await resolveContainedPath(configDirectory, workflowSetting);
+    storageDir = await resolveContainedPath(configDirectory, storageSetting ?? ".abilitybench");
+  } catch (error: unknown) {
+    if (error instanceof PathEscapeError) throw new ConfigError("path_escaped", error.message);
+    throw error;
+  }
   if (!(await existsFile(workflowPath))) {
     throw new ConfigError("workflow_not_found", `Workflow module "${workflowPath}" was not found.`);
   }
@@ -97,20 +105,6 @@ function isBuiltWorkflow(value: unknown): value is BuiltWorkflow {
     Array.isArray(topologicalOrder) &&
     Object.isFrozen(value)
   );
-}
-
-function containedPath(root: string, path: string): string {
-  const absolute = resolve(root, path);
-  const remainder = relative(root, absolute);
-  if (
-    path.length === 0 ||
-    remainder === ".." ||
-    remainder.startsWith(`..${sep}`) ||
-    isAbsolute(remainder)
-  ) {
-    throw new ConfigError("path_escaped", `Path "${path}" escapes config directory "${root}".`);
-  }
-  return absolute;
 }
 
 async function existsFile(path: string): Promise<boolean> {

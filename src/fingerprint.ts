@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { Stats } from "node:fs";
 import { lstat, readFile, realpath } from "node:fs/promises";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import { canonicalizeJson } from "./serialization.js";
 import type { JsonObject, JsonValue, StageDefinition } from "./types.js";
@@ -130,12 +130,16 @@ async function fingerprintWatchedFile(root: string, path: string): Promise<JsonO
   const absoluteRoot = resolve(root);
   const absolutePath = resolve(absoluteRoot, path);
   assertInsideRoot(absoluteRoot, absolutePath, path);
+  const realRoot = await realpath(absoluteRoot);
 
   let metadata: Stats;
   try {
     metadata = await lstat(absolutePath);
   } catch (error: unknown) {
-    if (isNodeError(error) && error.code === "ENOENT") return { path, state: "missing" };
+    if (isNodeError(error) && error.code === "ENOENT") {
+      await assertExistingParentInsideRoot(realRoot, dirname(absolutePath), path);
+      return { path, state: "missing" };
+    }
     throw new FingerprintInputError(
       "watch_read_failed",
       `Unable to inspect watched path "${path}".`,
@@ -143,27 +147,17 @@ async function fingerprintWatchedFile(root: string, path: string): Promise<JsonO
     );
   }
 
-  if (metadata.isSymbolicLink()) {
-    let target: string;
-    try {
-      target = await realpath(absolutePath);
-    } catch (error: unknown) {
-      throw new FingerprintInputError(
-        "watch_read_failed",
-        `Unable to resolve watched symbolic link "${path}".`,
-        error,
-      );
-    }
-    assertInsideRoot(absoluteRoot, target, path);
-    try {
-      metadata = await lstat(target);
-    } catch (error: unknown) {
-      throw new FingerprintInputError(
-        "watch_read_failed",
-        `Unable to inspect watched symbolic-link target "${path}".`,
-        error,
-      );
-    }
+  try {
+    const target = await realpath(absolutePath);
+    assertInsideRoot(realRoot, target, path);
+    metadata = await lstat(target);
+  } catch (error: unknown) {
+    if (error instanceof FingerprintInputError) throw error;
+    throw new FingerprintInputError(
+      "watch_read_failed",
+      `Unable to resolve watched path "${path}".`,
+      error,
+    );
   }
 
   if (!metadata.isFile()) {
@@ -182,6 +176,32 @@ async function fingerprintWatchedFile(root: string, path: string): Promise<JsonO
       `Unable to read watched file "${path}".`,
       error,
     );
+  }
+}
+
+async function assertExistingParentInsideRoot(
+  realRoot: string,
+  parent: string,
+  declaredPath: string,
+): Promise<void> {
+  let current = parent;
+  while (true) {
+    try {
+      assertInsideRoot(realRoot, await realpath(current), declaredPath);
+      return;
+    } catch (error: unknown) {
+      if (error instanceof FingerprintInputError) throw error;
+      if (!(isNodeError(error) && error.code === "ENOENT")) {
+        throw new FingerprintInputError(
+          "watch_read_failed",
+          `Unable to resolve parent of watched path "${declaredPath}".`,
+          error,
+        );
+      }
+      const next = dirname(current);
+      if (next === current) throw error;
+      current = next;
+    }
   }
 }
 

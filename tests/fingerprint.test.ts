@@ -1,4 +1,4 @@
-import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -128,5 +128,28 @@ describe("stage fingerprints", () => {
         dependencyArtifacts: {},
       }),
     ).rejects.toMatchObject({ code: "dependency_artifact_missing" });
+  });
+
+  it("rejects an existing watched file through a parent junction outside the root", async () => {
+    const root = await fixtureRoot();
+    const outside = await fixtureRoot();
+    await writeFile(join(outside, "secret.ts"), "outside\n", "utf8");
+    await symlink(outside, join(root, "linked"), "junction");
+    await expect(
+      fingerprint(root, stage(root, { watch: ["linked/secret.ts"] })),
+    ).rejects.toMatchObject({
+      code: "watch_path_escaped",
+    });
+  });
+
+  it("rejects a missing watched file through a parent junction outside the root", async () => {
+    const root = await fixtureRoot();
+    const outside = await fixtureRoot();
+    await symlink(outside, join(root, "linked"), "junction");
+    await expect(
+      fingerprint(root, stage(root, { watch: ["linked/missing.ts"] })),
+    ).rejects.toMatchObject({
+      code: "watch_path_escaped",
+    });
   });
 });
