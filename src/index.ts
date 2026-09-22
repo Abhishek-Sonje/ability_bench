@@ -8,6 +8,18 @@ export {
   type StageFingerprintResult,
 } from "./fingerprint.js";
 export {
+  type BaselineRun,
+  type BaselineStageExecutionStatus,
+  type BaselineStageRecord,
+  type DecisionReason,
+  PlanningError,
+  type PlanningErrorCode,
+  type PlanWorkflowRequest,
+  planWorkflow,
+  type StagePlanDecision,
+  type WorkflowPlan,
+} from "./planning.js";
+export {
   type ArtifactEnvelope,
   canonicalizeJson,
   createArtifact,

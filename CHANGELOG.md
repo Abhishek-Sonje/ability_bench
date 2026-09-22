@@ -17,3 +17,5 @@ not yet publish versioned releases.
   decoding.
 - Canonical stage fingerprints covering dependency artifacts, selected inputs, environment state,
   and exact watched-file bytes.
+- Conservative single-baseline planning with stable decision reasons, branch-local invalidation,
+  and component-level change explanations.
