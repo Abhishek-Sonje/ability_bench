@@ -33,6 +33,16 @@ export {
   type WorkflowPlan,
 } from "./planning.js";
 export {
+  type FinalizedRunManifest,
+  type FinalizeRunRequest,
+  finalizeRunManifest,
+  manifestToBaseline,
+  RunManifestError,
+  type RunManifestErrorCode,
+  type RunManifestStage,
+  verifyRunManifest,
+} from "./run-manifest.js";
+export {
   type ArtifactEnvelope,
   canonicalizeJson,
   createArtifact,

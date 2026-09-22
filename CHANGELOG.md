@@ -21,3 +21,5 @@ not yet publish versioned releases.
   and component-level change explanations.
 - Sequential stage execution with explicit dependency values, verified artifact reuse, runtime
   cache-miss fallback, and separate execution and evaluation statuses.
+- Immutable content-addressed run manifests with tamper detection and artifact-verified baseline
+  conversion.
