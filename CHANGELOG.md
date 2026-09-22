@@ -14,6 +14,7 @@ not yet publish versioned releases.
 - Recheck reuse before artifact load and reject noncanonical persisted JSON.
 - Reject stages that watch the configured artifact storage directory.
 - Record a failed run when a watched path becomes invalid after planning, rather than rejecting without a run result.
+- Reject array subclasses and non-enumerable array elements at the canonical JSON boundary.
 
 ### Added
 

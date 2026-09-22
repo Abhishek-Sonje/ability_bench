@@ -26,6 +26,7 @@ describe("canonical JSON", () => {
     ["infinity", Number.POSITIVE_INFINITY, "invalid_number"],
     ["negative zero", -0, "invalid_number"],
     ["date", new Date(0), "custom_prototype"],
+    ["array subclass", new (class extends Array {})(), "custom_prototype"],
     ["sparse array", Array(1), "sparse_array"],
     ["unpaired surrogate", "\ud800", "invalid_unicode"],
   ])("rejects %s", (_label, value, code) => {
@@ -66,6 +67,16 @@ describe("canonical JSON", () => {
       expect.objectContaining<Partial<SerializationError>>({ code: "accessor_property" }),
     );
     expect(invoked).toBe(false);
+  });
+
+  it("rejects non-enumerable array elements", () => {
+    const value = Object.defineProperty([1], "0", { enumerable: false });
+    expect(() => canonicalizeJson(value)).toThrowError(
+      expect.objectContaining<Partial<SerializationError>>({
+        code: "non_enumerable_property",
+        path: "$/0",
+      }),
+    );
   });
 });
 

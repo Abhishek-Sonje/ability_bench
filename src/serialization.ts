@@ -112,6 +112,9 @@ function serialize(value: unknown, path: string, seen: WeakSet<object>): string 
 }
 
 function serializeArray(value: unknown[], path: string, seen: WeakSet<object>): string {
+  if (Object.getPrototypeOf(value) !== Array.prototype) {
+    throw new SerializationError("custom_prototype", path, "Only plain arrays are supported");
+  }
   for (const key of Reflect.ownKeys(value)) {
     if (typeof key === "symbol") {
       throw new SerializationError("symbol_key", path, "Symbol-keyed properties are unsupported");
@@ -135,7 +138,14 @@ function serializeArray(value: unknown[], path: string, seen: WeakSet<object>): 
     }
     const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
     assertDataProperty(descriptor, pointer(path, String(index)));
-    items.push(serialize(value[index], pointer(path, String(index)), seen));
+    if (descriptor.enumerable !== true) {
+      throw new SerializationError(
+        "non_enumerable_property",
+        pointer(path, String(index)),
+        "Non-enumerable array elements are unsupported",
+      );
+    }
+    items.push(serialize(descriptor.value, pointer(path, String(index)), seen));
   }
   return `[${items.join(",")}]`;
 }
