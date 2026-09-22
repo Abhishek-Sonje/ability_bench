@@ -458,7 +458,7 @@ Phase 0 uses stable reason codes:
 - `fingerprint_match`
 - `baseline_artifact_unavailable`
 
-For `fingerprint_changed`, details list changed fingerprint components when the baseline stored component digests are available, such as `watchedFiles`, `selectedInputs`, `environment`, `implementation`, `dependencyArtifacts`, `cachePolicy`, or `codec`. Explanations never expose raw environment values.
+For `fingerprint_changed`, details list changed fingerprint components when the baseline stored component digests are available, such as `watchedFiles`, `selectedInputs`, `environment`, `implementation`, `dependencies`, `cachePolicy`, or `codec`. Explanations never expose raw environment values.
 
 ### 10.2 Planning algorithm
 

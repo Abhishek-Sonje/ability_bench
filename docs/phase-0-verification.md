@@ -16,6 +16,8 @@ quality gate with `pnpm check` (lint, typecheck, build, and tests).
   without borrowing each other's artifacts.
 - Manual invalidation, cache-disabled and volatile stages, branch-local changes, and late artifact
   loss conservatively rerun descendants. An equal output hash does not stop propagation.
+- Added and rewired stages execute against an older baseline; removed stages do not enter the new
+  plan.
 - Execution failure is recorded separately from evaluation status. Declared inputs changing
   during a callback fail the run before its output artifact is published.
 - Local artifacts and run manifests are content-addressed and immutable. The loader supports one
@@ -23,7 +25,6 @@ quality gate with `pnpm check` (lint, typecheck, build, and tests).
 
 ## Remaining proof work
 
-- Add focused regressions for graph additions/removals and changed dependency lists.
 - Exercise unreadable watched files and interrupted persistence on supported platforms. The
   existing tests cover escaped paths, junctions, missing files, corruption, and tampering.
 - Validate the SDK on a realistic small developer workflow and measure declaration burden. The

@@ -251,6 +251,79 @@ describe("conservative workflow planning", () => {
     });
   });
 
+  it("handles added, removed, and rewired stages against an old baseline", async () => {
+    const original = await fixture();
+    const baseline = await baselineFor(original);
+    await writeFile(join(original.root, "extra.ts"), "extra-v1\n", "utf8");
+    const builder = defineWorkflow({ id: original.id, root: original.root });
+    for (const stage of original.stages) {
+      if (stage.id === "independent") continue;
+      builder.stage({
+        id: stage.id,
+        dependsOn: stage.id === "join" ? ["left", "right", "extra"] : stage.dependencyIds,
+        implementation: stage.implementation,
+        watch: stage.watchedPaths,
+        inputs: stage.inputPointers,
+        env: stage.environmentNames,
+        cache: true,
+        run: stage.run,
+      });
+    }
+    builder.stage({
+      id: "extra",
+      dependsOn: ["seed"],
+      implementation: "extra-v1",
+      watch: ["extra.ts"],
+      inputs: [],
+      env: [],
+      cache: true,
+      run: () => null,
+    });
+    const changed = builder.build();
+    const plan = await planWorkflow({
+      workflow: changed,
+      inputs: {},
+      environment: {},
+      baseline,
+      invalidate: [],
+    });
+    expect(summary(plan)).toMatchObject({
+      seed: ["reuse", "fingerprint_match"],
+      left: ["reuse", "fingerprint_match"],
+      right: ["reuse", "fingerprint_match"],
+      extra: ["execute", "stage_missing_from_baseline"],
+      join: ["execute", "dependency_executed"],
+      report: ["execute", "dependency_executed"],
+    });
+    expect(plan.decisions.some(({ stageId }) => stageId === "independent")).toBe(false);
+
+    const rewired = defineWorkflow({ id: original.id, root: original.root });
+    for (const stage of original.stages) {
+      rewired.stage({
+        id: stage.id,
+        dependsOn: stage.id === "independent" ? ["seed"] : stage.dependencyIds,
+        implementation: stage.implementation,
+        watch: stage.watchedPaths,
+        inputs: stage.inputPointers,
+        env: stage.environmentNames,
+        cache: true,
+        run: stage.run,
+      });
+    }
+    const rewiredPlan = await planWorkflow({
+      workflow: rewired.build(),
+      inputs: {},
+      environment: {},
+      baseline,
+      invalidate: [],
+    });
+    expect(rewiredPlan.decisions.find(({ stageId }) => stageId === "independent")).toMatchObject({
+      decision: "execute",
+      reason: "fingerprint_changed",
+      details: { changedComponents: ["dependencies"] },
+    });
+  });
+
   it("rejects invalid baselines and invalidation targets", async () => {
     const workflow = await fixture();
     const baseline = await baselineFor(workflow);
