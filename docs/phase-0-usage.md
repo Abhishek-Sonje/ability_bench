@@ -76,6 +76,10 @@ for (const stage of candidate.execution.stages) {
 The caller must select one completed baseline run explicitly. The candidate records that run's
 content hash and can reuse artifacts only from that baseline.
 
+Watched paths must stay within the workflow root, including when a directory is a symbolic link
+or junction. A stage cannot watch files inside its run's storage directory, including a custom
+`storageDir`. The engine rejects such a run before executing any stage.
+
 ## Cacheability
 
 Mark a stage `cache: true` only when its result is determined by declared dependency outputs,

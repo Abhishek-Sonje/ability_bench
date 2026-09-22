@@ -8,7 +8,7 @@ valid artifacts from one immutable baseline and conservatively rerun affected st
 
 ## Status
 
-Phase 0 is under active development. The public contract is specified before implementation:
+Phase 0 is under active development. Its execution contract and current SDK usage are documented:
 
 - [Product plan](./plan.md)
 - [Phase 0 execution contract](./execution-contract.md)

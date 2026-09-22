@@ -7,6 +7,13 @@ not yet publish versioned releases.
 
 ## Unreleased
 
+### Changed
+
+- Reject storage paths and watched paths that escape the workflow root through symbolic links or junctions.
+- Snapshot run inputs and declared environment values; isolate stage data from callback mutations.
+- Recheck reuse before artifact load and reject noncanonical persisted JSON.
+- Reject stages that watch the configured artifact storage directory.
+
 ### Added
 
 - Phase 0 execution contract.

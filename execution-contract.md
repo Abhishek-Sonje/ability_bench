@@ -1,6 +1,6 @@
 # AbilityBench Phase 0 Execution Contract
 
-Status: proposed technical specification. This document defines behavior only; it does not authorize or prescribe implementation yet.
+Status: Phase 0 implementation contract. The engine prototype is implemented; see [Phase 0 usage](./docs/phase-0-usage.md) for runnable SDK examples. The go/no-go gates below are still open.
 
 ## 1. Phase 0 Objective
 
@@ -114,10 +114,6 @@ import { defineWorkflow, runWorkflow } from "abilitybench";
 const workflow = defineWorkflow({
   id: "branching-example",
   root: import.meta.dirname,
-  inputSchema: {
-    dataset: "json",
-    region: "json"
-  }
 })
   .stage({
     id: "seed",
@@ -222,7 +218,7 @@ Conventions:
 - The workflow path is resolved relative to the configuration file.
 - The workflow module must have one default export containing a built, sealed workflow definition.
 - Merely importing the module must not execute a run.
-- `root` defaults to the directory containing the configuration file and is resolved to an absolute, normalized path.
+- The workflow declaration supplies `root` explicitly. The loader requires it to equal the configuration directory.
 - Watched files and the storage directory resolve relative to `root`.
 - Watched paths may not escape `root`, including through `..` or resolved symbolic links.
 - Phase 0 supports exactly one workflow per configuration file. Multi-workflow discovery is deferred.
@@ -358,12 +354,12 @@ An artifact is decoded only after its bytes, length, codec, and hash have been v
 For each watched path, the fingerprint manifest contains:
 
 - normalized root-relative path using `/` separators
-- state: `file`, `missing`, or `invalid`
+- state: `file` or `missing`
 - SHA-256 of the exact file bytes when state is `file`
 
 Directories and globs are not supported in Phase 0. Paths are deduplicated and sorted. A missing watched file is fingerprintable and therefore changes the fingerprint relative to an existing file. An unreadable file, directory, escaped path, or unsupported symbolic-link target aborts planning; it does not silently force reuse or execution.
 
-The storage directory must not be watchable.
+The storage directory must not be watched. The runner rejects a watched path within the configured storage directory before stage execution.
 
 ### 7.4 External run inputs
 

@@ -1,3 +1,5 @@
+import { isAbsolute, relative, resolve, sep } from "node:path";
+
 import { executeWorkflow, type WorkflowExecutionResult } from "./execution.js";
 import { FileArtifactStore, FileRunManifestStore } from "./filesystem-store.js";
 import { PathEscapeError, resolveContainedPath } from "./path-safety.js";
@@ -26,7 +28,11 @@ export interface RunWorkflowResult {
   readonly storageDir: string;
 }
 
-export type RunWorkflowErrorCode = "baseline_not_found" | "invalid_inputs" | "storage_path_escaped";
+export type RunWorkflowErrorCode =
+  | "baseline_not_found"
+  | "invalid_inputs"
+  | "storage_path_escaped"
+  | "storage_path_watched";
 
 export class RunWorkflowError extends Error {
   constructor(
@@ -60,6 +66,21 @@ export async function runWorkflow(
       throw new RunWorkflowError("storage_path_escaped", error.message);
     }
     throw error;
+  }
+  for (const stage of workflow.stages) {
+    for (const watchedPath of stage.watchedPaths) {
+      const watchedAbsolute = resolve(workflow.root, watchedPath);
+      const remainder = relative(storageDir, watchedAbsolute);
+      if (
+        remainder === "" ||
+        (remainder !== ".." && !remainder.startsWith(`..${sep}`) && !isAbsolute(remainder))
+      ) {
+        throw new RunWorkflowError(
+          "storage_path_watched",
+          `Stage "${stage.id}" watches "${watchedPath}" inside the storage directory.`,
+        );
+      }
+    }
   }
   const artifacts = new FileArtifactStore(storageDir);
   const manifests = new FileRunManifestStore(storageDir);

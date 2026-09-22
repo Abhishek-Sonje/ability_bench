@@ -116,4 +116,29 @@ describe("runWorkflow", () => {
     ).rejects.toMatchObject({ code: "storage_path_escaped" });
     expect(calls).toEqual([]);
   });
+
+  it("rejects a watched path inside the default or configured storage directory", async () => {
+    const { root, calls } = await fixture();
+    for (const storageDir of [".abilitybench", "results"]) {
+      const workflow = defineWorkflow({ id: "storage-watch", root })
+        .stage({
+          id: "watched",
+          dependsOn: [],
+          implementation: "v1",
+          watch: [`${storageDir}/artifact.json`],
+          inputs: [],
+          env: [],
+          cache: true,
+          run: () => {
+            calls.push("watched");
+            return null;
+          },
+        })
+        .build();
+      await expect(
+        runWorkflow(workflow, { inputs: {}, baseline: null, storageDir }),
+      ).rejects.toMatchObject({ code: "storage_path_watched" });
+    }
+    expect(calls).toEqual([]);
+  });
 });
