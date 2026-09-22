@@ -12,7 +12,8 @@ quality gate with `pnpm check` (lint, typecheck, build, and tests).
 - Fingerprints include declared dependencies, selected inputs, environment state, watched bytes,
   implementation revision, cache policy, and codec.
 - A candidate names one baseline. Missing, failed, foreign, tampered, or corrupt baseline data
-  cannot silently become reusable output.
+  cannot silently become reusable output. Sibling candidates remain anchored to the same baseline
+  without borrowing each other's artifacts.
 - Manual invalidation, cache-disabled and volatile stages, branch-local changes, and late artifact
   loss conservatively rerun descendants. An equal output hash does not stop propagation.
 - Execution failure is recorded separately from evaluation status. Declared inputs changing
@@ -22,8 +23,7 @@ quality gate with `pnpm check` (lint, typecheck, build, and tests).
 
 ## Remaining proof work
 
-- Add focused regressions for graph additions/removals and changed dependency lists, and for two
-  candidates branching from the same baseline.
+- Add focused regressions for graph additions/removals and changed dependency lists.
 - Exercise unreadable watched files and interrupted persistence on supported platforms. The
   existing tests cover escaped paths, junctions, missing files, corruption, and tampering.
 - Validate the SDK on a realistic small developer workflow and measure declaration burden. The

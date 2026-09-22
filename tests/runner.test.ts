@@ -97,6 +97,35 @@ describe("runWorkflow", () => {
     });
   });
 
+  it("keeps sibling candidates anchored to the same immutable baseline", async () => {
+    const { workflow, calls } = await fixture();
+    const baseline = await runWorkflow(workflow, { inputs: {}, baseline: null, environment: {} });
+    calls.length = 0;
+    const leftCandidate = await runWorkflow(workflow, {
+      inputs: {},
+      baseline: { runId: baseline.manifest.id },
+      invalidate: ["left"],
+      environment: {},
+    });
+    expect(calls).toEqual(["left", "join", "report"]);
+    calls.length = 0;
+    const rightCandidate = await runWorkflow(workflow, {
+      inputs: {},
+      baseline: { runId: baseline.manifest.id },
+      invalidate: ["right"],
+      environment: {},
+    });
+    expect(calls).toEqual(["right", "join", "report"]);
+    expect(leftCandidate.manifest.baselineRunId).toBe(baseline.manifest.id);
+    expect(rightCandidate.manifest.baselineRunId).toBe(baseline.manifest.id);
+    expect(leftCandidate.manifest.baselineManifestHash).toBe(baseline.manifest.manifestHash);
+    expect(rightCandidate.manifest.baselineManifestHash).toBe(baseline.manifest.manifestHash);
+    expect(rightCandidate.manifest.stages.find(({ stageId }) => stageId === "left")).toMatchObject({
+      finalDecision: "reuse",
+      decisionReason: "fingerprint_match",
+    });
+  });
+
   it("rejects a missing baseline before executing stages", async () => {
     const { workflow, calls } = await fixture();
     await expect(
