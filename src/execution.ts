@@ -216,6 +216,19 @@ export async function executeWorkflow(
           ),
         ),
       });
+      const afterRun = await computeStageFingerprint({
+        workflowId: request.workflow.id,
+        workflowRoot: request.workflow.root,
+        stage,
+        runInputs: request.inputs,
+        environment: request.environment,
+        dependencyArtifacts,
+      });
+      if (afterRun.fingerprint !== fingerprint.fingerprint) {
+        throw new Error(
+          `Declared inputs for stage "${stageId}" changed during execution; its output cannot be safely recorded.`,
+        );
+      }
       const artifact = createArtifact(result);
       await request.artifacts.put(artifact);
       values.set(stageId, decodeArtifact(artifact));

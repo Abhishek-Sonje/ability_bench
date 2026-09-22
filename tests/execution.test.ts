@@ -350,4 +350,40 @@ describe("workflow execution", () => {
       "skipped_dependency_failed",
     );
   });
+
+  it("fails a run when declared inputs change while a stage executes", async () => {
+    let root = "";
+    const workflow = await workflowFixture({
+      left: async () => {
+        await writeFile(join(root, "left.ts"), "changed during execution\n", "utf8");
+        return { unsafe: true };
+      },
+    });
+    root = workflow.root;
+    const plan = await planWorkflow({
+      workflow,
+      inputs: {},
+      environment: {},
+      baseline: null,
+      invalidate: [],
+    });
+    const result = await executeWorkflow({
+      workflow,
+      plan,
+      inputs: {},
+      environment: {},
+      artifacts: new InMemoryArtifactStore(),
+    });
+    expect(result.executionStatus).toBe("failed");
+    expect(result.stages.find(({ stageId }) => stageId === "left")).toMatchObject({
+      executionStatus: "failed",
+      outputArtifactHash: null,
+      error: {
+        message: expect.stringContaining("changed during execution"),
+      },
+    });
+    expect(result.stages.find(({ stageId }) => stageId === "join")?.executionStatus).toBe(
+      "skipped_dependency_failed",
+    );
+  });
 });

@@ -96,6 +96,8 @@ It also records one primary reason and zero or more supporting details. Planning
 
 Stages execute sequentially in Phase 0 according to the stored plan. A reused stage loads and validates its baseline artifact. An executed stage receives only its declared inputs through the stage context.
 
+The engine fingerprints declared inputs immediately before and after a stage callback. If they differ, the stage fails and no output artifact is published for it. This detects ordinary file changes during execution, but cannot detect a file that changes and returns to identical bytes between the two checks.
+
 If a reusable artifact is missing, corrupt, undecodable, or has a hash mismatch at execution time, the engine changes that stage's decision to `execute` with reason `baseline_artifact_unavailable`. Because the Phase 0 rule is "an executed dependency invalidates its dependents," all not-yet-run descendants are replanned to execute before execution continues.
 
 If a stage fails, its descendants become `skipped_dependency_failed`. With the only Phase 0 failure mode, `stop`, any other not-yet-started stage becomes `skipped_run_stopped`. A failed run cannot become a baseline. Continuing independent branches after a failure is deferred.
@@ -669,6 +671,8 @@ Plain SHA-256 prevents casual plaintext exposure but not guessing. A project-loc
 ### 15.6 Cross-machine determinism has limits
 
 Canonical data and root-relative paths are portable, but watched source bytes may differ because of line endings or generated builds. Phase 0 hashes exact bytes intentionally. Node runtime, loader, and platform support must be pinned for reproducible tests.
+
+The pre/post fingerprint check is not an atomic filesystem snapshot. Cacheable stages still require their watched inputs to remain stable while they run; concurrent writers capable of an A-B-A change can evade this check. A stronger snapshot or file-read interception would be a later-phase design change.
 
 ### 15.7 Filesystem persistence still needs atomicity
 
