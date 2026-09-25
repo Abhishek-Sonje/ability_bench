@@ -40,6 +40,10 @@ Artifact hashes and run IDs must match strict lowercase SHA-256 formats before a
 User-provided path fragments are never joined into storage paths. This prevents traversal outside
 the configured storage root.
 
+Writes first create a uniquely named temporary file and publish it with an immutable hard link.
+Failed publication attempts remove their temporary file. If the process terminates before cleanup,
+the leftover `.tmp-*` file is never considered an artifact or run manifest and does not prevent a
+later write from publishing the canonical content.
+
 Local content addressing detects corruption and accidental replacement. It is not authentication
 against an attacker who can rewrite both data and every reference to it.
-

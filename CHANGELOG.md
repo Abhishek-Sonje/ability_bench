@@ -19,6 +19,8 @@ not yet publish versioned releases.
 - Validate cache-policy combinations at workflow sealing for JavaScript callers as well as TypeScript callers.
 - Expand branch-and-join invalidation tests and document the remaining Phase 0 proof gates.
 - Cover graph additions, removals, and dependency rewiring against an immutable baseline.
+- Normalize storage setup failures and verify interrupted or failed publication cannot expose a
+  temporary file as committed content.
 
 ### Added
 

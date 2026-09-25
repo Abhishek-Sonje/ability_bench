@@ -97,6 +97,38 @@ describe("filesystem artifact storage", () => {
       code: "invalid_artifact_hash",
     });
   });
+
+  it("cleans temporary content when immutable publication fails", async () => {
+    const root = await temporaryRoot();
+    const artifact = createArtifact({ stable: true });
+    const objectDirectory = join(root, "objects", "sha256");
+    const finalPath = join(objectDirectory, artifact.contentHash.slice("sha256:".length));
+    await mkdir(finalPath, { recursive: true });
+
+    await expect(new FileArtifactStore(root).put(artifact)).rejects.toMatchObject({
+      code: "write_failed",
+    });
+    expect((await readdir(objectDirectory)).filter((entry) => entry.startsWith(".tmp-"))).toEqual(
+      [],
+    );
+  });
+
+  it("ignores stale temporary files left by an interrupted process", async () => {
+    const root = await temporaryRoot();
+    const objectDirectory = join(root, "objects", "sha256");
+    await mkdir(objectDirectory, { recursive: true });
+    await writeFile(join(objectDirectory, ".tmp-interrupted"), "partial", "utf8");
+    const artifact = createArtifact({ committed: true });
+    const store = new FileArtifactStore(root);
+
+    expect(await store.get(artifact.contentHash)).toBeUndefined();
+    await store.put(artifact);
+    expect(await store.get(artifact.contentHash)).toEqual(artifact);
+    expect(await readdir(objectDirectory)).toEqual([
+      ".tmp-interrupted",
+      artifact.contentHash.slice("sha256:".length),
+    ]);
+  });
 });
 
 describe("filesystem run-manifest storage", () => {

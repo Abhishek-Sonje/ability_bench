@@ -22,11 +22,13 @@ quality gate with `pnpm check` (lint, typecheck, build, and tests).
   during a callback fail the run before its output artifact is published.
 - Local artifacts and run manifests are content-addressed and immutable. The loader supports one
   explicitly configured TypeScript workflow.
+- Failed immutable publication cleans its temporary file. Temporary files left by a terminated
+  process are ignored and cannot be loaded as committed objects.
 
 ## Remaining proof work
 
-- Exercise unreadable watched files and interrupted persistence on supported platforms. The
-  existing tests cover escaped paths, junctions, missing files, corruption, and tampering.
+- Exercise unreadable watched files on supported platforms. Existing tests cover escaped paths,
+  junctions, missing files, invalid targets, corruption, tampering, and interrupted persistence.
 - Validate the SDK on a realistic small developer workflow and measure declaration burden. The
   contract's usability and purity-understanding go/no-go gates cannot be proven by unit tests.
 - Document the supported runtime/platform matrix beyond the current Node.js 24 development

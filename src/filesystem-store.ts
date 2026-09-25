@@ -159,9 +159,9 @@ export class FileRunManifestStore {
 }
 
 async function writeImmutable(path: string, bytes: Uint8Array, identity: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
   const temporaryPath = join(dirname(path), `.tmp-${randomUUID()}`);
   try {
+    await mkdir(dirname(path), { recursive: true });
     await writeFile(temporaryPath, bytes, { flag: "wx" });
     try {
       await link(temporaryPath, path);
