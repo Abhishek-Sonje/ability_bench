@@ -2,16 +2,15 @@
 
 ## Outcome
 
-Phase 0 is a technical success and a product-ergonomics hold.
+Phase 0 is a technical success with a conditional SDK-ergonomics pass.
 
 The execution engine has demonstrated deterministic planning, conservative invalidation,
 content-addressed persistence, explicit lineage, integrity-checked reuse, and useful structured
 reasons on a branch-and-join workflow. It is reasonable to preserve this engine design.
 
-The public stage API is not yet comfortable enough to expand into SQLite, LLM integrations, a
-CLI, or a UI. The realistic release-readiness example exposes the issue: safe declarations are
-understandable, but direct dependency values are untyped JSON and require repetitive runtime
-validation.
+The typed stage-handle checkpoint removed the most immediate ergonomics problem: direct dependency
+values are inferred from their stage callbacks while the runtime still receives a fully declared
+DAG. External selected inputs remain untyped JSON and require explicit validation.
 
 ## Go/no-go gates
 
@@ -22,29 +21,28 @@ validation.
 | Branch-local changes preserve unrelated reuse | Pass | Planner, executor, and release-readiness integration tests |
 | One immutable baseline is practical | Pass | First run, full reuse, and sibling-candidate lineage tests |
 | Serialization failures are understandable | Pass | Strict JSON error codes, paths, and failed-run records |
-| Easier than a bespoke cache | Conditional pass | Engine use is much smaller than reimplementing storage and invalidation, but declarations remain verbose |
+| Easier than a bespoke cache | Conditional pass | Typed handles remove dependency parsing, but metadata and external-input validation remain verbose |
 | Purity boundary is understood by developers | Unproven | Documented thoroughly, but not validated with external users |
 
 ## Declaration burden observed
 
-The example contains six stages and is 135 lines including validation helpers. Every stage repeats
+The example contains six stages and is 115 lines including input validation helpers. Every stage repeats
 seven contract fields: dependencies, implementation revision, watched paths, selected inputs,
 environment names, cache policy, and callback. That repetition is defensible because each field
 changes fingerprint or invalidation semantics.
 
-The larger problem is value typing. The current callback receives
-`Record<string, JsonValue>` for dependency outputs and selected inputs. The example needs helper
-functions to validate objects, arrays, booleans, numbers, properties, and dependency lookup before
-performing simple work. This is safe but noisy, and misspelled dependency keys are runtime errors.
+Typed handles now make misspelled dependency keys compile-time errors and eliminate object,
+property, and dependency lookup helpers. Selected external inputs still use
+`Record<string, JsonValue>`; the example needs helpers for arrays, booleans, and numbers.
 
 ## Recommendation
 
 Do not begin the broad original Phase 1 yet. First run a narrow SDK ergonomics checkpoint that
 preserves the execution contract:
 
-1. Prototype typed stage handles or an object-based workflow definition that infers direct
-   dependency outputs without hiding dependencies.
-2. Add optional input/output validators whose stable identity is explicit in the fingerprint
+1. Keep typed stage handles as an additive API until more workflows validate their inference and
+   compiler performance.
+2. Prototype optional input validators whose stable identity is explicit in the fingerprint
    contract; do not silently infer schemas.
 3. Test both API shapes on the release-readiness example and one external developer workflow.
 4. Continue only if declarations become materially shorter and type errors become local and clear.

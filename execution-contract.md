@@ -185,7 +185,14 @@ Required behavioral properties:
 - No ambient AbilityBench API exposes undeclared stage outputs.
 - A stage may still access ambient Node.js state directly, but doing so violates the cacheability contract unless the stage is non-cacheable.
 
-### 4.1 Cache policy
+### 4.1 Typed composition
+
+The SDK also exposes `defineStage` and `createWorkflow`. A stage handle carries its literal ID and
+inferred JSON output type. Passing handles through `dependsOn` gives callbacks typed direct
+dependency outputs while preserving the same persisted definition and runtime validation. Handles
+contain no output value and defining them never executes user code.
+
+### 4.2 Cache policy
 
 ```ts
 type StageCachePolicy =

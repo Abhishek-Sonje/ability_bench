@@ -70,6 +70,17 @@ export {
   SerializationError,
   type SerializationErrorCode,
 } from "./serialization.js";
+export {
+  type AnyStageHandle,
+  type ComposedWorkflowOptions,
+  createWorkflow,
+  type DependencyOutputs,
+  defineStage,
+  type StageHandle,
+  type StageHandleOutput,
+  type TypedStageContext,
+  type TypedStageDeclaration,
+} from "./typed-workflow.js";
 export type {
   BuiltWorkflow,
   JsonObject,

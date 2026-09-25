@@ -39,6 +39,48 @@ Each stage sees only its direct dependencies. Selected external inputs are keyed
 JSON Pointer; for example, `/value` is accessed as `inputs["/value"]`. A missing selection is
 omitted. Output must be strict JSON data.
 
+## Typed stage handles
+
+For workflows whose stages consume structured outputs, define stage handles first and compose the
+sealed workflow afterward:
+
+```ts
+import { createWorkflow, defineStage } from "abilitybench";
+
+const source = defineStage({
+  id: "source",
+  dependsOn: [],
+  implementation: "source-v1",
+  watch: ["./workflow.ts"],
+  inputs: [],
+  env: [],
+  cache: true,
+  run: () => ({ count: 42 }),
+});
+
+const report = defineStage({
+  id: "report",
+  dependsOn: [source],
+  implementation: "report-v1",
+  watch: ["./workflow.ts"],
+  inputs: [],
+  env: [],
+  cache: true,
+  run: ({ dependencies }) => ({ total: dependencies.source.count }),
+});
+
+export default createWorkflow({
+  id: "typed-example",
+  root: import.meta.dirname,
+  stages: [source, report],
+});
+```
+
+`dependsOn` contains handles rather than string IDs, so TypeScript infers each direct dependency's
+output. Handles carry declarations only; defining or composing them never executes stage code.
+Runtime cycle, duplicate-ID, and missing-dependency validation remains the same as the fluent API.
+Selected run inputs remain strict JSON and require application-level validation.
+
 ## Load configuration
 
 The default config filename is `abilitybench.config.ts` in the current directory. The workflow

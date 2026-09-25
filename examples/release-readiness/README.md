@@ -20,3 +20,6 @@ security, summary, and report execute while the other stages reuse.
 
 This example is intentionally local and deterministic. It does not call an LLM, invoke tools, or
 perform evaluation, keeping it within Phase 0.
+
+The workflow uses typed stage handles. Direct dependency outputs are inferred by TypeScript;
+external JSON inputs are validated explicitly at the boundary.
