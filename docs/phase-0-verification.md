@@ -31,8 +31,8 @@ quality gate with `pnpm check` (lint, typecheck, build, and tests).
 
 - Validate the SDK on a realistic small developer workflow and measure declaration burden. The
   contract's usability and purity-understanding go/no-go gates cannot be proven by unit tests.
-- Document the supported runtime/platform matrix beyond the current Node.js 24 development
-  environment before publishing a package.
+- Run the conformance suite on Linux and macOS before promoting those provisional platforms to
+  supported release targets.
 
 ## Safety boundary
 

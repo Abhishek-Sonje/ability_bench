@@ -15,6 +15,7 @@ Phase 0 is under active development. Its execution contract and current SDK usag
 - [Phase 0 storage guarantees](./docs/phase-0-storage.md)
 - [Phase 0 usage](./docs/phase-0-usage.md)
 - [Phase 0 verification and remaining gates](./docs/phase-0-verification.md)
+- [Platform support](./docs/platform-support.md)
 
 AbilityBench is not ready for production use.
 
@@ -60,7 +61,7 @@ environment variables, and watched files. AbilityBench cannot detect an undeclar
 
 Requirements:
 
-- Node.js 24.20.0 or newer
+- Node.js 24.20.0 or newer within the Node 24 release line
 - Corepack with pnpm 12.5.1
 
 ```bash
