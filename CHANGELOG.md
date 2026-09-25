@@ -24,6 +24,8 @@ not yet publish versioned releases.
 - Reject missing watched paths whose nearest existing ancestor is not a directory, with explicit
   invalid-target and unreadable-file regression coverage.
 - Define the Phase 0 Node.js, TypeScript-loader, operating-system, and filesystem support boundary.
+- Add a realistic six-stage release-readiness workflow, verify branch-local reuse, and record the
+  Phase 0 technical-go/product-ergonomics-hold assessment.
 
 ### Added
 

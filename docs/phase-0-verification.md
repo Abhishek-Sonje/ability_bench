@@ -29,10 +29,13 @@ quality gate with `pnpm check` (lint, typecheck, build, and tests).
 
 ## Remaining proof work
 
-- Validate the SDK on a realistic small developer workflow and measure declaration burden. The
-  contract's usability and purity-understanding go/no-go gates cannot be proven by unit tests.
 - Run the conformance suite on Linux and macOS before promoting those provisional platforms to
   supported release targets.
+- Validate purity understanding and declaration ergonomics with a developer unfamiliar with the
+  implementation.
+
+The local SDK exercise and declaration-burden assessment are recorded in
+[Phase 0 Assessment](./phase-0-assessment.md).
 
 ## Safety boundary
 
