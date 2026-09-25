@@ -21,6 +21,8 @@ not yet publish versioned releases.
 - Cover graph additions, removals, and dependency rewiring against an immutable baseline.
 - Normalize storage setup failures and verify interrupted or failed publication cannot expose a
   temporary file as committed content.
+- Reject missing watched paths whose nearest existing ancestor is not a directory, with explicit
+  invalid-target and unreadable-file regression coverage.
 
 ### Added
 

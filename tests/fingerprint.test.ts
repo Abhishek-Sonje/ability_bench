@@ -1,4 +1,4 @@
-import { mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -115,6 +115,45 @@ describe("stage fingerprints", () => {
     const result = await fingerprint(root, stage(root, { watch: ["missing.ts"] }));
     expect(result.manifest.watchedFiles).toEqual([{ path: "missing.ts", state: "missing" }]);
   });
+
+  it("rejects a watched directory as an invalid target", async () => {
+    const root = await fixtureRoot();
+    await mkdir(join(root, "watched-directory"));
+    await expect(
+      fingerprint(root, stage(root, { watch: ["watched-directory"] })),
+    ).rejects.toMatchObject({
+      code: "invalid_watch_target",
+    });
+  });
+
+  it("rejects a missing watched path beneath a regular file", async () => {
+    const root = await fixtureRoot();
+    await writeFile(join(root, "not-a-directory"), "file\n", "utf8");
+    await expect(
+      fingerprint(root, stage(root, { watch: ["not-a-directory/child.ts"] })),
+    ).rejects.toMatchObject({
+      code: "invalid_watch_target",
+    });
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects an unreadable watched file on POSIX",
+    async () => {
+      const root = await fixtureRoot();
+      const path = join(root, "unreadable.ts");
+      await writeFile(path, "private\n", "utf8");
+      await chmod(path, 0);
+      try {
+        await expect(
+          fingerprint(root, stage(root, { watch: ["unreadable.ts"] })),
+        ).rejects.toMatchObject({
+          code: "watch_read_failed",
+        });
+      } finally {
+        await chmod(path, 0o600);
+      }
+    },
+  );
 
   it("fails when a dependency artifact identity is absent", async () => {
     const root = await fixtureRoot();

@@ -18,6 +18,8 @@ quality gate with `pnpm check` (lint, typecheck, build, and tests).
   loss conservatively rerun descendants. An equal output hash does not stop propagation.
 - Added and rewired stages execute against an older baseline; removed stages do not enter the new
   plan.
+- Watched directories, escaped junctions, and missing paths beneath non-directory ancestors are
+  rejected. Permission-denied reads have a POSIX-specific regression.
 - Execution failure is recorded separately from evaluation status. Declared inputs changing
   during a callback fail the run before its output artifact is published.
 - Local artifacts and run manifests are content-addressed and immutable. The loader supports one
@@ -27,8 +29,6 @@ quality gate with `pnpm check` (lint, typecheck, build, and tests).
 
 ## Remaining proof work
 
-- Exercise unreadable watched files on supported platforms. Existing tests cover escaped paths,
-  junctions, missing files, invalid targets, corruption, tampering, and interrupted persistence.
 - Validate the SDK on a realistic small developer workflow and measure declaration burden. The
   contract's usability and purity-understanding go/no-go gates cannot be proven by unit tests.
 - Document the supported runtime/platform matrix beyond the current Node.js 24 development

@@ -187,7 +187,14 @@ async function assertExistingParentInsideRoot(
   let current = parent;
   while (true) {
     try {
-      assertInsideRoot(realRoot, await realpath(current), declaredPath);
+      const physical = await realpath(current);
+      assertInsideRoot(realRoot, physical, declaredPath);
+      if (!(await lstat(physical)).isDirectory()) {
+        throw new FingerprintInputError(
+          "invalid_watch_target",
+          `Parent of watched path "${declaredPath}" is not a directory.`,
+        );
+      }
       return;
     } catch (error: unknown) {
       if (error instanceof FingerprintInputError) throw error;
