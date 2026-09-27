@@ -23,6 +23,8 @@ export type StageDeclaration = StageCachePolicy & {
   readonly implementation: string;
   readonly watch: readonly string[];
   readonly inputs: readonly string[];
+  /** Stable input contracts keyed by JSON Pointer. Internal typed-SDK field. */
+  readonly inputContracts?: Readonly<Record<string, string>>;
   readonly env: readonly string[];
   readonly run: StageFunction;
 };
@@ -40,6 +42,7 @@ export interface StageDefinition {
   readonly implementation: string;
   readonly watchedPaths: readonly string[];
   readonly inputPointers: readonly string[];
+  readonly inputContracts: Readonly<Record<string, string>>;
   readonly environmentNames: readonly string[];
   readonly cachePolicy: CachePolicy;
   readonly outputCodec: "canonical-json-v1";

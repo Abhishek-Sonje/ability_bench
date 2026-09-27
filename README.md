@@ -27,20 +27,25 @@ Declare every stage before running the workflow. Stage callbacks receive only th
 direct dependencies and selected external inputs.
 
 ```ts
-import { defineWorkflow, runWorkflow } from "abilitybench";
+import { cache, createWorkflow, defineStage, input, runWorkflow } from "abilitybench";
 
-const workflow = defineWorkflow({ id: "example", root: import.meta.dirname })
-  .stage({
-    id: "source",
-    dependsOn: [],
-    implementation: "source-v1",
-    watch: ["./workflow.ts"],
-    inputs: ["/value"],
-    env: [],
-    cache: true,
-    run: ({ inputs }) => ({ value: inputs["/value"] ?? null }),
-  })
-  .build();
+const source = defineStage({
+  id: "source",
+  dependsOn: [],
+  inputs: { value: input.number("/value") },
+  cache: cache.enabled({
+    revision: "source-v1",
+    files: ["./workflow.ts"],
+    environment: [],
+  }),
+  run: ({ inputs }) => ({ value: inputs.value }),
+});
+
+const workflow = createWorkflow({
+  id: "example",
+  root: import.meta.dirname,
+  stages: [source],
+});
 
 const baseline = await runWorkflow(workflow, {
   inputs: { value: 42 },
@@ -58,6 +63,8 @@ The caller chooses one baseline explicitly. Each run is stored under the workflo
 
 Cacheable stages must behave as pure functions of their declared dependencies, selected inputs,
 environment variables, and watched files. AbilityBench cannot detect an undeclared influence.
+Typed input contracts are fingerprinted, and the grouped cache declaration makes each influence
+category visible at the stage boundary.
 
 ## Development
 

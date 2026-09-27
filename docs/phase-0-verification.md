@@ -8,6 +8,9 @@ quality gate with `pnpm check` (lint, typecheck, build, and tests).
 - A complete branch-and-join DAG is sealed before execution, validated for missing dependencies
   and cycles, and ordered deterministically.
 - Stage callbacks receive direct dependency outputs and selected external inputs explicitly.
+- Typed stages infer direct dependency outputs, validate selected inputs with fingerprinted
+  built-in contracts, and group revision, watched files, and environment names in one cache
+  declaration.
 - Canonical JSON rejects unsupported values and verifies artifact bytes, codec, length, and hash.
 - Fingerprints include declared dependencies, selected inputs, environment state, watched bytes,
   implementation revision, cache policy, and codec.

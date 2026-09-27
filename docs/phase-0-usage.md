@@ -45,27 +45,29 @@ For workflows whose stages consume structured outputs, define stage handles firs
 sealed workflow afterward:
 
 ```ts
-import { createWorkflow, defineStage } from "abilitybench";
+import { cache, createWorkflow, defineStage, input } from "abilitybench";
 
 const source = defineStage({
   id: "source",
   dependsOn: [],
-  implementation: "source-v1",
-  watch: ["./workflow.ts"],
-  inputs: [],
-  env: [],
-  cache: true,
-  run: () => ({ count: 42 }),
+  inputs: { count: input.number("/count") },
+  cache: cache.enabled({
+    revision: "source-v1",
+    files: ["./workflow.ts"],
+    environment: [],
+  }),
+  run: ({ inputs }) => ({ count: inputs.count }),
 });
 
 const report = defineStage({
   id: "report",
   dependsOn: [source],
-  implementation: "report-v1",
-  watch: ["./workflow.ts"],
-  inputs: [],
-  env: [],
-  cache: true,
+  inputs: {},
+  cache: cache.enabled({
+    revision: "report-v1",
+    files: ["./workflow.ts"],
+    environment: [],
+  }),
   run: ({ dependencies }) => ({ total: dependencies.source.count }),
 });
 
@@ -77,9 +79,18 @@ export default createWorkflow({
 ```
 
 `dependsOn` contains handles rather than string IDs, so TypeScript infers each direct dependency's
-output. Handles carry declarations only; defining or composing them never executes stage code.
-Runtime cycle, duplicate-ID, and missing-dependency validation remains the same as the fluent API.
-Selected run inputs remain strict JSON and require application-level validation.
+output. Input descriptors give selected values stable runtime validation and inferred callback
+types. Built-in descriptors support JSON, booleans, numbers, strings, string arrays, and optional
+values. Their contract IDs are fingerprinted, so changing a value contract invalidates reuse.
+
+`cache.enabled` groups every cache influence category: revision, watched files, and environment
+names. Its TypeScript type requires at least one watched file. `cache.disabled` and
+`cache.volatile` make always-execute intent explicit while retaining revision and influence
+metadata. These declarations make omissions more visible but cannot discover ambient filesystem,
+network, clock, randomness, or process-state reads.
+
+Handles carry declarations only; defining or composing them never executes stage code. Runtime
+cycle, duplicate-ID, and missing-dependency validation remains the same as the fluent API.
 
 ## Load configuration
 

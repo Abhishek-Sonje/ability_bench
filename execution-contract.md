@@ -178,9 +178,9 @@ Required behavioral properties:
 - The workflow is fully declared and sealed before `runWorkflow` starts.
 - `run` receives a `dependencies` object containing exactly the declared direct dependencies, keyed by stage ID.
 - A stage does not receive a general workflow-result registry.
-- `inputs` contains only values selected by the stage's JSON Pointer selectors. Phase 0 keys each
-  value by its exact pointer, such as `inputs["/dataset"]`; a missing selection is omitted. This
-  avoids collisions between nested selectors. Named input aliases are deferred.
+- `inputs` contains only values selected by the stage's JSON Pointer selectors. The fluent API
+  keys values by their exact pointer, such as `inputs["/dataset"]`. Typed stages use explicitly
+  named descriptors and receive validated, inferred values by alias.
 - `env` contains only names declared by the stage.
 - No ambient AbilityBench API exposes undeclared stage outputs.
 - A stage may still access ambient Node.js state directly, but doing so violates the cacheability contract unless the stage is non-cacheable.
@@ -191,6 +191,17 @@ The SDK also exposes `defineStage` and `createWorkflow`. A stage handle carries 
 inferred JSON output type. Passing handles through `dependsOn` gives callbacks typed direct
 dependency outputs while preserving the same persisted definition and runtime validation. Handles
 contain no output value and defining them never executes user code.
+
+Typed stages declare selected inputs as named built-in descriptors. Each descriptor has a JSON
+Pointer, a stable contract ID, runtime validation, and an inferred TypeScript value. Contract IDs
+are fingerprinted with selected values. Phase 0 intentionally does not accept arbitrary parser
+functions because their transformation behavior and implementation identity would be ambiguous.
+
+Typed stages also use `cache.enabled`, `cache.disabled`, or `cache.volatile`. These declarations
+group the implementation revision, watched files, and environment names so influence categories
+cannot be scattered across the stage object. Cacheable declarations require at least one watched
+file in both TypeScript and runtime validation. This improves declaration visibility; it does not
+prove that the lists are exhaustive.
 
 ### 4.2 Cache policy
 
@@ -253,6 +264,7 @@ type StageDefinition = {
   implementation: string;
   watchedPaths: string[];
   inputPointers: string[];
+  inputContracts: Record<string, string>;
   environmentNames: string[];
   cachePolicy: "cacheable" | "disabled" | "volatile";
   outputCodec: "canonical-json-v1";
@@ -374,12 +386,19 @@ The storage directory must not be watched. The runner rejects a watched path wit
 
 The run accepts one strict JSON input object. Each stage declares JSON Pointer selectors. The stage fingerprint includes a canonical object mapping each declared pointer to either:
 
-- `{ "state": "present", "value": ... }`
-- `{ "state": "missing" }`
+- `{ "contract": "...", "state": "present", "value": ... }`
+- `{ "contract": "...", "state": "missing" }`
 
-Pointers are deduplicated and sorted. Selecting a parent and its child is allowed but discouraged because it duplicates fingerprint material. The complete selected values are passed to the function through `inputs`, keyed by their exact JSON Pointer. Missing selections are omitted.
+Pointers are deduplicated and sorted. Selecting a parent and its child is allowed but discouraged
+because it duplicates fingerprint material. The fluent API passes selected values keyed by exact
+JSON Pointer and omits missing values. Typed stages pass values under declared aliases after their
+built-in contracts validate; optional descriptors pass `undefined` when missing.
 
 An undeclared run input does not affect that stage. Reading it through another channel violates the cacheability contract.
+
+The fluent API assigns `untyped-json-v1` to pointer selectors. The typed API uses stable built-in
+contract IDs. Changing only an input descriptor therefore changes the `selectedInputs` component
+and forces execution.
 
 ### 7.5 Environment variables
 
@@ -659,7 +678,10 @@ Mitigation for Phase 0 is honesty, conservative defaults, required watched sourc
 
 ### 15.2 The API may require too much metadata
 
-`implementation`, `watch`, `inputs`, `env`, dependencies, and cache policy are explicit but verbose. If maintaining these declarations is comparable to maintaining a bespoke cache, the product fails its usability goal.
+Dependencies, typed inputs, revision, watched files, environment names, and cache policy remain
+explicit. The typed API groups cache influences and eliminates parsing boilerplate, but if
+maintaining these declarations approaches the cost of a bespoke cache, the product fails its
+usability goal.
 
 Phase 0 should measure declaration burden, not only engine correctness. Convenience defaults must not be added until their safety is understood.
 

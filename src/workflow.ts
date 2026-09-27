@@ -24,6 +24,7 @@ export type WorkflowValidationCode =
   | "invalid_cache_policy"
   | "invalid_environment_name"
   | "invalid_input_pointer"
+  | "invalid_input_contract"
   | "invalid_stage_id"
   | "invalid_watch_path"
   | "invalid_workflow_id"
@@ -190,6 +191,27 @@ function normalizeStage(
       );
     }
   }
+  const inputContracts: Record<string, string> = {};
+  for (const pointer of declaration.inputs) {
+    const contract = declaration.inputContracts?.[pointer] ?? "untyped-json-v1";
+    if (contract.trim() === "") {
+      issues.push(
+        issue("invalid_input_contract", `Input selector "${pointer}" has an empty contract.`, id),
+      );
+    }
+    inputContracts[pointer] = contract;
+  }
+  for (const pointer of Object.keys(declaration.inputContracts ?? {})) {
+    if (!declaration.inputs.includes(pointer)) {
+      issues.push(
+        issue(
+          "invalid_input_contract",
+          `Input contract for "${pointer}" has no matching selector in stage "${id}".`,
+          id,
+        ),
+      );
+    }
+  }
   for (const name of declaration.env) {
     if (!ENV_PATTERN.test(name)) {
       issues.push(issue("invalid_environment_name", `Environment name "${name}" is invalid.`, id));
@@ -202,6 +224,7 @@ function normalizeStage(
     implementation: declaration.implementation,
     watchedPaths: Object.freeze(watchedPaths),
     inputPointers: Object.freeze([...declaration.inputs]),
+    inputContracts: Object.freeze(inputContracts),
     environmentNames: Object.freeze([...declaration.env]),
     cachePolicy,
     outputCodec: "canonical-json-v1",

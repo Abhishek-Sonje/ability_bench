@@ -79,7 +79,16 @@ export async function computeStageFingerprint(
       const selection = resolveJsonPointer(request.runInputs, pointer);
       return [
         pointer,
-        selection.found ? { state: "present", value: selection.value } : { state: "missing" },
+        selection.found
+          ? {
+              contract: stage.inputContracts[pointer] ?? "untyped-json-v1",
+              state: "present",
+              value: selection.value,
+            }
+          : {
+              contract: stage.inputContracts[pointer] ?? "untyped-json-v1",
+              state: "missing",
+            },
       ];
     }),
   ) as JsonObject;

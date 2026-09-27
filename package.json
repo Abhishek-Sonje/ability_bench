@@ -16,7 +16,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "check": "pnpm lint && pnpm typecheck && pnpm test",
+    "check": "biome check . && tsc -p tsconfig.build.json && tsc -p tsconfig.json --noEmit && vitest run",
     "example:release-readiness": "pnpm build && node examples/release-readiness/run.ts",
     "format": "biome format --write .",
     "lint": "biome check .",

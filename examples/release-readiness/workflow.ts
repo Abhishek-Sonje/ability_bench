@@ -1,89 +1,61 @@
-import { createWorkflow, defineStage, type JsonValue } from "abilitybench";
+import { cache, createWorkflow, defineStage, input } from "abilitybench";
 
-function stringArray(value: JsonValue | undefined, label: string): string[] {
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
-    throw new TypeError(`${label} must be an array of strings.`);
-  }
-  return value;
-}
-
-function boolean(value: JsonValue | undefined, label: string): boolean {
-  if (typeof value !== "boolean") throw new TypeError(`${label} must be a boolean.`);
-  return value;
-}
-
-function number(value: JsonValue | undefined, label: string): number {
-  if (typeof value !== "number") throw new TypeError(`${label} must be a number.`);
-  return value;
-}
+const cached = (revision: string) =>
+  cache.enabled({
+    revision,
+    files: ["workflow.ts"],
+    environment: [],
+  });
 
 const inventory = defineStage({
   id: "inventory",
   dependsOn: [],
-  implementation: "inventory-v1",
-  watch: ["workflow.ts"],
-  inputs: ["/packages"],
-  env: [],
-  cache: true,
-  run: ({ inputs }) => {
-    const packages = stringArray(inputs["/packages"], "packages");
-    return { packageCount: packages.length, packages };
-  },
+  inputs: { packages: input.stringArray("/packages") },
+  cache: cached("inventory-v1"),
+  run: ({ inputs }) => ({
+    packageCount: inputs.packages.length,
+    packages: inputs.packages,
+  }),
 });
 
 const unitTests = defineStage({
   id: "unit-tests",
   dependsOn: [inventory],
-  implementation: "unit-tests-v1",
-  watch: ["workflow.ts"],
-  inputs: ["/signals/testsPassed"],
-  env: [],
-  cache: true,
+  inputs: { testsPassed: input.boolean("/signals/testsPassed") },
+  cache: cached("unit-tests-v1"),
   run: ({ dependencies, inputs }) => ({
     packageCount: dependencies.inventory.packageCount,
-    passed: boolean(inputs["/signals/testsPassed"], "testsPassed"),
+    passed: inputs.testsPassed,
   }),
 });
 
 const security = defineStage({
   id: "security",
   dependsOn: [inventory],
-  implementation: "security-v1",
-  watch: ["workflow.ts"],
-  inputs: ["/signals/criticalVulnerabilities"],
-  env: [],
-  cache: true,
-  run: ({ dependencies, inputs }) => {
-    const critical = number(inputs["/signals/criticalVulnerabilities"], "criticalVulnerabilities");
-    return {
-      critical,
-      packageCount: dependencies.inventory.packageCount,
-      passed: critical === 0,
-    };
+  inputs: {
+    criticalVulnerabilities: input.number("/signals/criticalVulnerabilities"),
   },
+  cache: cached("security-v1"),
+  run: ({ dependencies, inputs }) => ({
+    critical: inputs.criticalVulnerabilities,
+    packageCount: dependencies.inventory.packageCount,
+    passed: inputs.criticalVulnerabilities === 0,
+  }),
 });
 
 const documentation = defineStage({
   id: "documentation",
   dependsOn: [],
-  implementation: "documentation-v1",
-  watch: ["workflow.ts"],
-  inputs: ["/signals/docsCurrent"],
-  env: [],
-  cache: true,
-  run: ({ inputs }) => ({
-    passed: boolean(inputs["/signals/docsCurrent"], "docsCurrent"),
-  }),
+  inputs: { docsCurrent: input.boolean("/signals/docsCurrent") },
+  cache: cached("documentation-v1"),
+  run: ({ inputs }) => ({ passed: inputs.docsCurrent }),
 });
 
 const summary = defineStage({
   id: "summary",
   dependsOn: [documentation, security, unitTests],
-  implementation: "summary-v1",
-  watch: ["workflow.ts"],
-  inputs: [],
-  env: [],
-  cache: true,
+  inputs: {},
+  cache: cached("summary-v1"),
   run: ({ dependencies }) => {
     const checks = [
       { id: "documentation", passed: dependencies.documentation.passed },
@@ -97,11 +69,8 @@ const summary = defineStage({
 const report = defineStage({
   id: "report",
   dependsOn: [summary],
-  implementation: "report-v1",
-  watch: ["workflow.ts"],
-  inputs: [],
-  env: [],
-  cache: true,
+  inputs: {},
+  cache: cached("report-v1"),
   run: ({ dependencies }) => {
     const { ready } = dependencies.summary;
     return { message: ready ? "Release is ready." : "Release is blocked.", ready };

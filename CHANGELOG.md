@@ -28,6 +28,8 @@ not yet publish versioned releases.
   Phase 0 technical-go/product-ergonomics-hold assessment.
 - Add typed stage handles and workflow composition so direct dependency outputs are inferred
   without weakening explicit DAG declaration or runtime validation.
+- Add fingerprinted typed-input descriptors and grouped cache influence declarations, making
+  external input contracts and cache dependencies harder to omit or scatter.
 
 ### Added
 

@@ -142,6 +142,30 @@ describe("workflow declaration", () => {
     );
   });
 
+  it("rejects malformed input contract metadata", () => {
+    const builder = defineWorkflow({ id: "input-contracts", root })
+      .stage(
+        stage("empty-contract", [], {
+          inputs: ["/value"],
+          inputContracts: { "/value": "" },
+        }),
+      )
+      .stage(
+        stage("unknown-contract", [], {
+          inputs: [],
+          inputContracts: { "/undeclared": "required-string-v1" },
+        }),
+      );
+    expect(() => builder.build()).toThrowError(
+      expect.objectContaining<Partial<WorkflowValidationError>>({
+        issues: expect.arrayContaining([
+          expect.objectContaining({ code: "invalid_input_contract", stageId: "empty-contract" }),
+          expect.objectContaining({ code: "invalid_input_contract", stageId: "unknown-contract" }),
+        ]),
+      }),
+    );
+  });
+
   it("seals a builder after build", () => {
     const builder = defineWorkflow({ id: "sealed", root }).stage(stage("only"));
     builder.build();
