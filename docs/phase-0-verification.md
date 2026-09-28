@@ -32,8 +32,8 @@ quality gate with `pnpm check` (lint, typecheck, build, and tests).
 
 ## Remaining proof work
 
-- Run the conformance suite on Linux and macOS before promoting those provisional platforms to
-  supported release targets.
+- Run the conformance suite on macOS before promoting macOS from provisional status. Windows and
+  GitHub-hosted Ubuntu now pass the full gate.
 - Validate purity understanding and declaration ergonomics with a developer unfamiliar with the
   implementation.
 

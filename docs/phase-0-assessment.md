@@ -47,7 +47,8 @@ features, automatic import discovery, or unsafe cache defaults.
 
 ## Remaining external validation
 
-- Run the conformance suite on Linux and macOS before calling those platforms supported.
+- Run the conformance suite on macOS before claiming macOS support. Windows and GitHub-hosted
+  Ubuntu now pass the full gate.
 - Have at least one developer unfamiliar with the implementation declare a small workflow and
   explain which ambient reads would violate cacheability.
 - Confirm the local hard-link publication protocol on the filesystems intended for release.

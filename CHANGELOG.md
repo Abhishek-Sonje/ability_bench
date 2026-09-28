@@ -9,6 +9,8 @@ not yet publish versioned releases.
 
 ### Changed
 
+- Promote Windows x64 and GitHub-hosted Ubuntu/Linux x64 to verified local-filesystem targets after
+  both CI quality jobs passed, while keeping macOS provisional and network filesystems unsupported.
 - Normalize `ENOENT` and `ENOTDIR` while classifying missing watched paths so regular-file
   ancestors produce the same `invalid_watch_target` result on Windows and POSIX systems.
 - Record the Phase 1 readiness decision, external verification gates, release decisions, and

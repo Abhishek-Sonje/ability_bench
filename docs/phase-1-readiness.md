@@ -6,9 +6,9 @@ The local execution product is ready for external validation, but it is not yet 
 release.
 
 The deterministic engine and local CLI now cover declaration, planning, execution, immutable run
-inspection, exact run comparison, and bounded run discovery. Local Windows verification is green.
-The remaining gates require a GitHub-hosted POSIX run and feedback from a workflow not designed by
-the implementation author.
+inspection, exact run comparison, and bounded run discovery. GitHub-hosted Ubuntu and Windows
+verification is green. The remaining product gate requires feedback from a workflow not designed
+by the implementation author.
 
 ## Completed gates
 
@@ -21,22 +21,13 @@ the implementation author.
 | Immutable local history | Pass | Canonical manifests, exact inspection, deterministic diff, and bounded listing |
 | Human explanations | Pass locally | Every plan and run decision includes a stable reason and structured details |
 | Machine interface | Pass locally | Versioned success and error documents with stable exit statuses |
-| Windows quality gate | Pass | Local `pnpm check` and built-binary smoke tests |
-| Linux quality gate | Pending external verification | GitHub Actions job is configured but has not run in this workspace |
+| Windows quality gate | Pass | Local checks, built-binary smoke tests, and GitHub-hosted CI |
+| Linux quality gate | Pass | GitHub-hosted Ubuntu CI, including the POSIX permission regression |
 | Independent workflow ergonomics | Pending external verification | Current examples and fixtures were authored with the engine |
 
 ## External verification required
 
-### 1. GitHub-hosted matrix
-
-Push the commits to GitHub and confirm both `Quality (ubuntu-latest)` and
-`Quality (windows-latest)` pass. The Ubuntu run is required to exercise the POSIX permission test
-that is intentionally skipped on Windows.
-
-If either job fails, preserve the job log and runner image details. Do not weaken filesystem or
-integrity behavior merely to make the matrix green.
-
-### 2. Independent workflow exercise
+### 1. Independent workflow exercise
 
 Have a developer who did not implement the engine model one small real workflow containing:
 
@@ -53,7 +44,7 @@ an exact inspection, and a two-run diff. Record where declarations or explanatio
 The exercise passes only if the developer can explain every reused and executed stage and can name
 the ambient reads that would make a cacheable stage unsafe.
 
-### 3. Filesystem publication environment
+### 2. Filesystem publication environment
 
 Run the immutable-publication tests on each filesystem intended for support. The current protocol
 depends on same-filesystem hard links. Network shares, synchronized folders, and unusual mounted
@@ -83,6 +74,6 @@ must be specified before implementation so evaluation status does not leak into 
 
 ## Phase 1 exit rule
 
-Phase 1 may be closed after the GitHub matrix passes and the independent workflow exercise is
-recorded with no correctness blocker. Ergonomic findings may become scoped follow-up work; unsafe
-reuse, unexplained decisions, or filesystem-integrity failures are release blockers.
+Phase 1 may be closed after the independent workflow exercise is recorded with no correctness
+blocker. Ergonomic findings may become scoped follow-up work; unsafe reuse, unexplained decisions,
+or filesystem-integrity failures are release blockers.

@@ -25,14 +25,14 @@ JavaScript.
 
 | Platform | Status | Notes |
 | --- | --- | --- |
-| Windows 11 x64 | Verified locally | Primary Phase 0 development platform; junction containment is covered |
-| Linux x64 | Provisional | Code paths and POSIX permission regression exist, but release CI is not established |
+| Windows x64 | Verified | Local development and GitHub-hosted CI; junction containment is covered |
+| Linux x64 | Verified | GitHub-hosted Ubuntu CI, including the POSIX permission regression |
 | macOS arm64/x64 | Provisional | Expected to work; not yet part of a release gate |
 | Network filesystems | Unsupported | Hard-link atomicity and consistency semantics vary |
 
 “Provisional” means the design is intended to be portable, not that a release guarantee exists.
-Before package publication, Linux and macOS must run the same `pnpm check` gate in clean
-environments.
+macOS must run the same `pnpm check` gate in a clean environment before a release claims macOS
+support.
 
 ## Filesystem requirements
 
