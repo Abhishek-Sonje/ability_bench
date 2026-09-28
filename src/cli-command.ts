@@ -4,6 +4,8 @@ import { parseArgs } from "node:util";
 
 import { loadWorkflowConfig } from "./config.js";
 import type { WorkflowExecutionResult } from "./execution.js";
+import { FileRunManifestStore } from "./filesystem-store.js";
+import type { FinalizedRunManifest } from "./run-manifest.js";
 import { runWorkflow } from "./runner.js";
 import type { JsonObject } from "./types.js";
 
@@ -11,6 +13,7 @@ const HELP = `AbilityBench
 
 Usage:
   abilitybench run --inputs <file> [options]
+  abilitybench inspect <run-id> [options]
 
 Options:
   --config <file>       Config file (default: ./abilitybench.config.ts)
@@ -30,54 +33,103 @@ export interface CliIo {
 
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
   try {
-    const parsed = parseArgs({
-      args: [...argv],
-      allowPositionals: true,
-      strict: true,
-      options: {
-        baseline: { type: "string" },
-        config: { type: "string" },
-        help: { type: "boolean", short: "h" },
-        inputs: { type: "string" },
-        invalidate: { type: "string", multiple: true },
-        json: { type: "boolean" },
-      },
-    });
+    const parsed = parseCliArgs(argv);
     if (parsed.values.help === true) {
       io.stdout(HELP);
       return 0;
     }
-    if (parsed.positionals.length !== 1 || parsed.positionals[0] !== "run") {
-      throw new CliUsageError('Expected the command "run".');
-    }
-    if (parsed.values.inputs === undefined) {
-      throw new CliUsageError('The "run" command requires --inputs <file>.');
-    }
-
-    const configPath = resolve(io.cwd, parsed.values.config ?? "abilitybench.config.ts");
-    const inputPath = resolve(io.cwd, parsed.values.inputs);
-    const inputs = await readInputObject(inputPath);
-    const loaded = await loadWorkflowConfig(configPath);
-    const result = await runWorkflow(loaded.workflow, {
-      inputs,
-      baseline: parsed.values.baseline === undefined ? null : { runId: parsed.values.baseline },
-      invalidate: parsed.values.invalidate ?? [],
-      environment: io.environment,
-      storageDir: loaded.storageDir,
-    });
-
-    io.stdout(
-      parsed.values.json === true
-        ? `${JSON.stringify(machineResult(result), null, 2)}\n`
-        : humanResult(result.execution, result.manifest.id),
-    );
-    return result.execution.executionStatus === "completed" ? 0 : 1;
+    const command = parsed.positionals[0];
+    if (command === "run") return await runCommand(parsed, io);
+    if (command === "inspect") return await inspectCommand(parsed, io);
+    throw new CliUsageError('Expected the command "run" or "inspect".');
   } catch (error: unknown) {
     const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     io.stderr(`${message}\n`);
     if (error instanceof CliUsageError) io.stderr("\nRun abilitybench --help for usage.\n");
     return 2;
   }
+}
+
+type ParsedCli = ReturnType<typeof parseCliArgs>;
+
+function parseCliArgs(argv: readonly string[]) {
+  return parseArgs({
+    args: [...argv],
+    allowPositionals: true,
+    strict: true,
+    options: {
+      baseline: { type: "string" },
+      config: { type: "string" },
+      help: { type: "boolean", short: "h" },
+      inputs: { type: "string" },
+      invalidate: { type: "string", multiple: true },
+      json: { type: "boolean" },
+    },
+  });
+}
+
+async function runCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
+  if (parsed.positionals.length !== 1) {
+    throw new CliUsageError('The "run" command does not accept positional arguments.');
+  }
+  if (parsed.values.inputs === undefined) {
+    throw new CliUsageError('The "run" command requires --inputs <file>.');
+  }
+
+  const configPath = resolve(io.cwd, parsed.values.config ?? "abilitybench.config.ts");
+  const inputPath = resolve(io.cwd, parsed.values.inputs);
+  const inputs = await readInputObject(inputPath);
+  const loaded = await loadWorkflowConfig(configPath);
+  const result = await runWorkflow(loaded.workflow, {
+    inputs,
+    baseline: parsed.values.baseline === undefined ? null : { runId: parsed.values.baseline },
+    invalidate: parsed.values.invalidate ?? [],
+    environment: io.environment,
+    storageDir: loaded.storageDir,
+  });
+
+  io.stdout(
+    parsed.values.json === true
+      ? `${JSON.stringify(machineResult(result), null, 2)}\n`
+      : humanResult(result.execution, result.manifest.id),
+  );
+  return result.execution.executionStatus === "completed" ? 0 : 1;
+}
+
+async function inspectCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
+  if (parsed.positionals.length !== 2) {
+    throw new CliUsageError('The "inspect" command requires exactly one <run-id>.');
+  }
+  if (
+    parsed.values.inputs !== undefined ||
+    parsed.values.baseline !== undefined ||
+    parsed.values.invalidate !== undefined
+  ) {
+    throw new CliUsageError(
+      'The "inspect" command accepts only --config, --json, and exactly one <run-id>.',
+    );
+  }
+
+  const loaded = await loadWorkflowConfig(
+    resolve(io.cwd, parsed.values.config ?? "abilitybench.config.ts"),
+  );
+  const runId = parsed.positionals[1] as string;
+  const manifest = await new FileRunManifestStore(loaded.storageDir).get(runId);
+  if (manifest === undefined) {
+    throw new Error(`Run "${runId}" was not found in "${loaded.storageDir}".`);
+  }
+  if (manifest.workflowId !== loaded.workflow.id) {
+    throw new Error(
+      `Run "${runId}" belongs to workflow "${manifest.workflowId}", not "${loaded.workflow.id}".`,
+    );
+  }
+
+  io.stdout(
+    parsed.values.json === true
+      ? `${JSON.stringify(inspectMachineResult(manifest), null, 2)}\n`
+      : inspectHumanResult(manifest),
+  );
+  return 0;
 }
 
 class CliUsageError extends Error {
@@ -135,6 +187,37 @@ function humanResult(execution: WorkflowExecutionResult, runId: string): string 
     "",
   ];
   for (const stage of execution.stages) {
+    const action = stage.finalDecision === "reuse" ? "REUSE" : "EXECUTE";
+    lines.push(
+      `${action.padEnd(7)} ${stage.stageId} [${stage.executionStatus}] ${stage.decisionReason}`,
+    );
+    if (Object.keys(stage.decisionDetails).length > 0) {
+      lines.push(`        ${JSON.stringify(stage.decisionDetails)}`);
+    }
+    if (stage.error !== null) lines.push(`        ${stage.error.name}: ${stage.error.message}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function inspectMachineResult(manifest: FinalizedRunManifest) {
+  return {
+    schemaVersion: "phase1-cli-inspect-v1",
+    manifest,
+  };
+}
+
+function inspectHumanResult(manifest: FinalizedRunManifest): string {
+  const lines = [
+    `Run: ${manifest.id}`,
+    `Workflow: ${manifest.workflowId}`,
+    `Status: ${manifest.executionStatus}`,
+    `Evaluation: ${manifest.evaluationStatus}`,
+    `Baseline: ${manifest.baselineRunId ?? "none"}`,
+    `Created: ${manifest.createdAt}`,
+    `Completed: ${manifest.completedAt}`,
+    "",
+  ];
+  for (const stage of manifest.stages) {
     const action = stage.finalDecision === "reuse" ? "REUSE" : "EXECUTE";
     lines.push(
       `${action.padEnd(7)} ${stage.stageId} [${stage.executionStatus}] ${stage.decisionReason}`,

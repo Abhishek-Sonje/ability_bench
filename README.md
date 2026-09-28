@@ -80,6 +80,14 @@ Pass `--baseline run_<digest>` to reuse from exactly that immutable run. Use `--
 <stage>` one or more times for manual invalidation, or `--json` for versioned machine output.
 The CLI never chooses a “latest” baseline implicitly.
 
+Inspect one stored run by its exact immutable ID:
+
+```bash
+node dist/cli.js inspect run_<digest> --config ./abilitybench.config.ts
+```
+
+Inspection verifies the stored manifest's canonical bytes and content identity before printing it.
+
 ## Development
 
 Requirements:

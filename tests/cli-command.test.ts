@@ -120,6 +120,52 @@ describe("run CLI", () => {
     expect(output.stdout.join("")).toMatch(/EXECUTE source \[succeeded\] no_baseline/);
   });
 
+  it("inspects one exact, integrity-checked run", async () => {
+    const inputs = await inputFile({});
+    const run = capture();
+    expect(
+      await runCli(["run", "--config", configPath, "--inputs", inputs, "--json"], run.io),
+    ).toBe(0);
+    const { runId } = JSON.parse(run.stdout.join("")) as { runId: string };
+
+    const machine = capture();
+    expect(await runCli(["inspect", runId, "--config", configPath, "--json"], machine.io)).toBe(0);
+    expect(JSON.parse(machine.stdout.join(""))).toMatchObject({
+      schemaVersion: "phase1-cli-inspect-v1",
+      manifest: {
+        id: runId,
+        workflowId: "loaded-fixture",
+        executionStatus: "completed",
+        evaluationStatus: "not_run",
+      },
+    });
+
+    const human = capture();
+    expect(await runCli(["inspect", runId, "--config", configPath], human.io)).toBe(0);
+    expect(human.stdout.join("")).toContain(`Run: ${runId}`);
+    expect(human.stdout.join("")).toContain("EXECUTE source [succeeded] no_baseline");
+  });
+
+  it("rejects missing inspect runs and run-only options", async () => {
+    const missing = capture();
+    expect(
+      await runCli(
+        ["inspect", `run_${"0".repeat(64)}`, "--config", configPath, "--json"],
+        missing.io,
+      ),
+    ).toBe(2);
+    expect(missing.stderr.join("")).toContain("was not found");
+
+    const invalidOptions = capture();
+    expect(
+      await runCli(
+        ["inspect", `run_${"0".repeat(64)}`, "--config", configPath, "--baseline", "x"],
+        invalidOptions.io,
+      ),
+    ).toBe(2);
+    expect(invalidOptions.stderr.join("")).toContain("accepts only --config, --json");
+  });
+
   it("rejects non-object inputs and usage errors without running", async () => {
     const inputs = await inputFile([]);
     const invalidInput = capture();
@@ -162,6 +208,7 @@ describe("run CLI", () => {
     const output = capture();
     expect(await runCli(["--help"], output.io)).toBe(0);
     expect(output.stdout.join("")).toContain("abilitybench run --inputs <file>");
+    expect(output.stdout.join("")).toContain("abilitybench inspect <run-id>");
     expect(output.stderr).toEqual([]);
   });
 });

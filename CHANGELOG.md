@@ -35,6 +35,8 @@ not yet publish versioned releases.
 
 - Local `abilitybench run` command with explicit JSON inputs, explicit immutable baseline
   selection, repeated manual invalidation, human explanations, and versioned JSON output.
+- Exact `abilitybench inspect <run-id>` lookup with manifest integrity verification and human or
+  versioned JSON output.
 - Phase 1 CLI contract documenting exit statuses and the decision to defer SQLite until query
   requirements justify it.
 - Phase 0 execution contract.

@@ -5,6 +5,7 @@
 Phase 1 begins with a thin local CLI over the verified execution engine:
 
     abilitybench run --inputs <file>
+    abilitybench inspect <run-id>
 
 This slice does not add SQLite. Immutable run manifests already provide correct baseline lookup,
 and the CLI currently performs no cross-run search, filtering, or aggregation that justifies a
@@ -28,6 +29,18 @@ Options:
 
 There is deliberately no `--latest` option. Filesystem ordering, timestamps, or mutable pointers
 must not choose a baseline implicitly.
+
+### Inspect
+
+    abilitybench inspect <run-id> [--config <file>] [--json]
+
+Inspection loads exactly one immutable manifest by its content-addressed run ID. The filesystem
+store verifies canonical serialization, the manifest hash, and the embedded run ID before any
+output is printed. The command also rejects a manifest whose workflow ID differs from the loaded
+project. It does not scan, sort, or select among runs.
+
+Human output preserves the run's recorded status and stage-by-stage decisions. JSON output wraps
+the verified manifest in the versioned `phase1-cli-inspect-v1` envelope.
 
 ## Output and exit status
 
@@ -61,6 +74,8 @@ The command tests cover:
 - human and versioned JSON output
 - non-object input rejection
 - usage errors and help without project loading
+- exact run inspection in human and versioned JSON formats
+- missing-run and inspect-option rejection
 - the built executable against the six-stage release-readiness example
 
 The release-readiness workflow was verified through a first CLI run followed by a second run that
