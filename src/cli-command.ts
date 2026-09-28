@@ -5,6 +5,7 @@ import { parseArgs } from "node:util";
 import { loadWorkflowConfig } from "./config.js";
 import type { WorkflowExecutionResult } from "./execution.js";
 import { FileRunManifestStore } from "./filesystem-store.js";
+import { diffRunManifests, type RunDiff } from "./run-diff.js";
 import type { FinalizedRunManifest } from "./run-manifest.js";
 import { runWorkflow } from "./runner.js";
 import type { JsonObject } from "./types.js";
@@ -14,6 +15,7 @@ const HELP = `AbilityBench
 Usage:
   abilitybench run --inputs <file> [options]
   abilitybench inspect <run-id> [options]
+  abilitybench diff <run-a> <run-b> [options]
 
 Options:
   --config <file>       Config file (default: ./abilitybench.config.ts)
@@ -41,7 +43,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     const command = parsed.positionals[0];
     if (command === "run") return await runCommand(parsed, io);
     if (command === "inspect") return await inspectCommand(parsed, io);
-    throw new CliUsageError('Expected the command "run" or "inspect".');
+    if (command === "diff") return await diffCommand(parsed, io);
+    throw new CliUsageError('Expected the command "run", "inspect", or "diff".');
   } catch (error: unknown) {
     const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     io.stderr(`${message}\n`);
@@ -114,22 +117,75 @@ async function inspectCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
     resolve(io.cwd, parsed.values.config ?? "abilitybench.config.ts"),
   );
   const runId = parsed.positionals[1] as string;
-  const manifest = await new FileRunManifestStore(loaded.storageDir).get(runId);
-  if (manifest === undefined) {
-    throw new Error(`Run "${runId}" was not found in "${loaded.storageDir}".`);
-  }
-  if (manifest.workflowId !== loaded.workflow.id) {
-    throw new Error(
-      `Run "${runId}" belongs to workflow "${manifest.workflowId}", not "${loaded.workflow.id}".`,
-    );
-  }
-
+  const manifest = await loadProjectManifest(
+    new FileRunManifestStore(loaded.storageDir),
+    runId,
+    loaded.workflow.id,
+    loaded.storageDir,
+  );
   io.stdout(
     parsed.values.json === true
       ? `${JSON.stringify(inspectMachineResult(manifest), null, 2)}\n`
       : inspectHumanResult(manifest),
   );
   return 0;
+}
+
+async function diffCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
+  if (parsed.positionals.length !== 3) {
+    throw new CliUsageError('The "diff" command requires exactly two run IDs.');
+  }
+  if (
+    parsed.values.inputs !== undefined ||
+    parsed.values.baseline !== undefined ||
+    parsed.values.invalidate !== undefined
+  ) {
+    throw new CliUsageError(
+      'The "diff" command accepts only --config, --json, and exactly two run IDs.',
+    );
+  }
+
+  const loaded = await loadWorkflowConfig(
+    resolve(io.cwd, parsed.values.config ?? "abilitybench.config.ts"),
+  );
+  const store = new FileRunManifestStore(loaded.storageDir);
+  const [from, to] = await Promise.all([
+    loadProjectManifest(
+      store,
+      parsed.positionals[1] as string,
+      loaded.workflow.id,
+      loaded.storageDir,
+    ),
+    loadProjectManifest(
+      store,
+      parsed.positionals[2] as string,
+      loaded.workflow.id,
+      loaded.storageDir,
+    ),
+  ]);
+  const diff = diffRunManifests(from, to);
+  io.stdout(
+    parsed.values.json === true ? `${JSON.stringify(diff, null, 2)}\n` : diffHumanResult(diff),
+  );
+  return 0;
+}
+
+async function loadProjectManifest(
+  store: FileRunManifestStore,
+  runId: string,
+  workflowId: string,
+  storageDir: string,
+): Promise<FinalizedRunManifest> {
+  const manifest = await store.get(runId);
+  if (manifest === undefined) {
+    throw new Error(`Run "${runId}" was not found in "${storageDir}".`);
+  }
+  if (manifest.workflowId !== workflowId) {
+    throw new Error(
+      `Run "${runId}" belongs to workflow "${manifest.workflowId}", not "${workflowId}".`,
+    );
+  }
+  return manifest;
 }
 
 class CliUsageError extends Error {
@@ -226,6 +282,23 @@ function inspectHumanResult(manifest: FinalizedRunManifest): string {
       lines.push(`        ${JSON.stringify(stage.decisionDetails)}`);
     }
     if (stage.error !== null) lines.push(`        ${stage.error.name}: ${stage.error.message}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function diffHumanResult(diff: RunDiff): string {
+  const lines = [
+    `Diff: ${diff.from.runId} -> ${diff.to.runId}`,
+    `Workflow: ${diff.workflowId}`,
+    `Execution: ${diff.from.executionStatus} -> ${diff.to.executionStatus}`,
+    `Evaluation: ${diff.from.evaluationStatus} -> ${diff.to.evaluationStatus}`,
+    `Baseline: ${diff.from.baselineRunId ?? "none"} -> ${diff.to.baselineRunId ?? "none"}`,
+    `Summary: ${diff.summary.added} added, ${diff.summary.removed} removed, ${diff.summary.changed} changed, ${diff.summary.unchanged} unchanged`,
+    "",
+  ];
+  for (const stage of diff.stages) {
+    const details = stage.changedFields.length === 0 ? "" : `: ${stage.changedFields.join(", ")}`;
+    lines.push(`${stage.kind.toUpperCase().padEnd(9)} ${stage.stageId}${details}`);
   }
   return `${lines.join("\n")}\n`;
 }

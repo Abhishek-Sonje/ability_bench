@@ -37,6 +37,8 @@ not yet publish versioned releases.
   selection, repeated manual invalidation, human explanations, and versioned JSON output.
 - Exact `abilitybench inspect <run-id>` lookup with manifest integrity verification and human or
   versioned JSON output.
+- Deterministic `abilitybench diff <run-a> <run-b>` comparisons with graph-evolution support,
+  canonical persisted-field comparisons, and a public pure manifest-diff API.
 - Phase 1 CLI contract documenting exit statuses and the decision to defer SQLite until query
   requirements justify it.
 - Phase 0 execution contract.

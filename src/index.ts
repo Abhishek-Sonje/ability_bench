@@ -46,6 +46,15 @@ export {
   type WorkflowPlan,
 } from "./planning.js";
 export {
+  diffRunManifests,
+  type RunDiff,
+  RunDiffError,
+  type RunDiffIdentity,
+  type RunDiffSummary,
+  type StageDiffKind,
+  type StageRunDiff,
+} from "./run-diff.js";
+export {
   type FinalizedRunManifest,
   type FinalizeRunRequest,
   finalizeRunManifest,

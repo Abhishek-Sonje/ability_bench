@@ -166,6 +166,48 @@ describe("run CLI", () => {
     expect(invalidOptions.stderr.join("")).toContain("accepts only --config, --json");
   });
 
+  it("diffs two exact runs in machine and human formats", async () => {
+    const inputs = await inputFile({});
+    const first = capture();
+    expect(
+      await runCli(["run", "--config", configPath, "--inputs", inputs, "--json"], first.io),
+    ).toBe(0);
+    const firstId = (JSON.parse(first.stdout.join("")) as { runId: string }).runId;
+    const second = capture();
+    expect(
+      await runCli(
+        ["run", "--config", configPath, "--inputs", inputs, "--baseline", firstId, "--json"],
+        second.io,
+      ),
+    ).toBe(0);
+    const secondId = (JSON.parse(second.stdout.join("")) as { runId: string }).runId;
+
+    const machine = capture();
+    expect(
+      await runCli(["diff", firstId, secondId, "--config", configPath, "--json"], machine.io),
+    ).toBe(0);
+    expect(JSON.parse(machine.stdout.join(""))).toMatchObject({
+      schemaVersion: "phase1-run-diff-v1",
+      from: { runId: firstId },
+      to: { runId: secondId },
+      summary: { added: 0, removed: 0, changed: 1, unchanged: 0 },
+      stages: [{ stageId: "source", kind: "changed" }],
+    });
+
+    const human = capture();
+    expect(await runCli(["diff", firstId, secondId, "--config", configPath], human.io)).toBe(0);
+    expect(human.stdout.join("")).toContain("Summary: 0 added, 0 removed, 1 changed");
+    expect(human.stdout.join("")).toContain("CHANGED   source");
+  });
+
+  it("requires exactly two run IDs for diff", async () => {
+    const output = capture();
+    expect(await runCli(["diff", `run_${"0".repeat(64)}`, "--config", configPath], output.io)).toBe(
+      2,
+    );
+    expect(output.stderr.join("")).toContain("requires exactly two run IDs");
+  });
+
   it("rejects non-object inputs and usage errors without running", async () => {
     const inputs = await inputFile([]);
     const invalidInput = capture();
@@ -209,6 +251,7 @@ describe("run CLI", () => {
     expect(await runCli(["--help"], output.io)).toBe(0);
     expect(output.stdout.join("")).toContain("abilitybench run --inputs <file>");
     expect(output.stdout.join("")).toContain("abilitybench inspect <run-id>");
+    expect(output.stdout.join("")).toContain("abilitybench diff <run-a> <run-b>");
     expect(output.stderr).toEqual([]);
   });
 });

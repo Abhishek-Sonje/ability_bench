@@ -6,6 +6,7 @@ Phase 1 begins with a thin local CLI over the verified execution engine:
 
     abilitybench run --inputs <file>
     abilitybench inspect <run-id>
+    abilitybench diff <run-a> <run-b>
 
 This slice does not add SQLite. Immutable run manifests already provide correct baseline lookup,
 and the CLI currently performs no cross-run search, filtering, or aggregation that justifies a
@@ -42,6 +43,24 @@ project. It does not scan, sort, or select among runs.
 Human output preserves the run's recorded status and stage-by-stage decisions. JSON output wraps
 the verified manifest in the versioned `phase1-cli-inspect-v1` envelope.
 
+### Diff
+
+    abilitybench diff <run-a> <run-b> [--config <file>] [--json]
+
+Diff loads exactly two explicitly named manifests through the same integrity-checked store. Both
+runs must belong to the configured workflow. A successful diff exits `0` whether or not changes
+exist; differences are data, not command failures.
+
+Stages are ordered as they appear in the first run, followed by stages found only in the second
+run. Each stage is classified as `added`, `removed`, `changed`, or `unchanged`. For stages present
+in both runs, every persisted stage field is compared with canonical JSON semantics and changed
+field names use a fixed order. This intentionally reports execution-decision changes separately
+from output artifact changes instead of treating equal outputs as equal run records.
+
+JSON output uses `phase1-run-diff-v1` and includes run identities, summary counts, changed field
+names, and the before/after stage records. The command performs no run discovery, implicit
+selection, or mutable indexing.
+
 ## Output and exit status
 
 Human output names the run, baseline, run status, and every stage's final decision, execution
@@ -76,6 +95,8 @@ The command tests cover:
 - usage errors and help without project loading
 - exact run inspection in human and versioned JSON formats
 - missing-run and inspect-option rejection
+- exact two-run diffs, graph additions/removals, and execute-to-reuse changes
+- deterministic changed-field ordering and diff arity rejection
 - the built executable against the six-stage release-readiness example
 
 The release-readiness workflow was verified through a first CLI run followed by a second run that

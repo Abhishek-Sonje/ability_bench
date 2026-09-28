@@ -88,6 +88,14 @@ node dist/cli.js inspect run_<digest> --config ./abilitybench.config.ts
 
 Inspection verifies the stored manifest's canonical bytes and content identity before printing it.
 
+Compare two explicitly selected immutable runs:
+
+```bash
+node dist/cli.js diff run_<old-digest> run_<new-digest> --config ./abilitybench.config.ts
+```
+
+The diff reports graph additions and removals plus every persisted field changed for shared stages.
+
 ## Development
 
 Requirements:
