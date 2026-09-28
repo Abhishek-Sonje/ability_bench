@@ -129,11 +129,11 @@ describe("stage fingerprints", () => {
   it("rejects a missing watched path beneath a regular file", async () => {
     const root = await fixtureRoot();
     await writeFile(join(root, "not-a-directory"), "file\n", "utf8");
-    await expect(
-      fingerprint(root, stage(root, { watch: ["not-a-directory/child.ts"] })),
-    ).rejects.toMatchObject({
-      code: "invalid_watch_target",
-    });
+    for (const watchedPath of ["not-a-directory/child.ts", "not-a-directory/missing/child.ts"]) {
+      await expect(fingerprint(root, stage(root, { watch: [watchedPath] }))).rejects.toMatchObject({
+        code: "invalid_watch_target",
+      });
+    }
   });
 
   it.skipIf(process.platform === "win32")(

@@ -9,6 +9,8 @@ not yet publish versioned releases.
 
 ### Changed
 
+- Normalize `ENOENT` and `ENOTDIR` while classifying missing watched paths so regular-file
+  ancestors produce the same `invalid_watch_target` result on Windows and POSIX systems.
 - Record the Phase 1 readiness decision, external verification gates, release decisions, and
   explicit boundary against premature database, evaluation, provider, and UI work.
 - Parse each CLI subcommand against its own option schema, reject duplicate scalar options, and

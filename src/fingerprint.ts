@@ -145,7 +145,7 @@ async function fingerprintWatchedFile(root: string, path: string): Promise<JsonO
   try {
     metadata = await lstat(absolutePath);
   } catch (error: unknown) {
-    if (isNodeError(error) && error.code === "ENOENT") {
+    if (isMissingPathError(error)) {
       await assertExistingParentInsideRoot(realRoot, dirname(absolutePath), path);
       return { path, state: "missing" };
     }
@@ -207,7 +207,7 @@ async function assertExistingParentInsideRoot(
       return;
     } catch (error: unknown) {
       if (error instanceof FingerprintInputError) throw error;
-      if (!(isNodeError(error) && error.code === "ENOENT")) {
+      if (!isMissingPathError(error)) {
         throw new FingerprintInputError(
           "watch_read_failed",
           `Unable to resolve parent of watched path "${declaredPath}".`,
@@ -289,4 +289,8 @@ function compareBy<Key extends string>(key: Key) {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
+}
+
+function isMissingPathError(error: unknown): boolean {
+  return isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR");
 }
