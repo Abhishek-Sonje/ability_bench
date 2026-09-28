@@ -146,6 +146,17 @@ describe("runWorkflow", () => {
     expect(calls).toEqual([]);
   });
 
+  it("rejects a non-object run input before execution", async () => {
+    const { workflow, calls } = await fixture();
+    await expect(
+      runWorkflow(workflow, {
+        inputs: [] as unknown as Record<string, never>,
+        baseline: null,
+      }),
+    ).rejects.toMatchObject({ code: "invalid_inputs" });
+    expect(calls).toEqual([]);
+  });
+
   it("rejects a watched path inside the default or configured storage directory", async () => {
     const { root, calls } = await fixture();
     for (const storageDir of [".abilitybench", "results"]) {

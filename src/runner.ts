@@ -51,7 +51,11 @@ export async function runWorkflow(
 ): Promise<RunWorkflowResult> {
   let inputs: JsonObject;
   try {
-    inputs = JSON.parse(canonicalizeJson(options.inputs)) as JsonObject;
+    const snapshot: unknown = JSON.parse(canonicalizeJson(options.inputs));
+    if (snapshot === null || Array.isArray(snapshot) || typeof snapshot !== "object") {
+      throw new TypeError("Expected a JSON object.");
+    }
+    inputs = snapshot as JsonObject;
   } catch (error: unknown) {
     throw new RunWorkflowError(
       "invalid_inputs",
