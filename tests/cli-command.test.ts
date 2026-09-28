@@ -208,6 +208,63 @@ describe("run CLI", () => {
     expect(output.stderr.join("")).toContain("requires exactly two run IDs");
   });
 
+  it("lists verified project runs newest-first with an explicit bound", async () => {
+    const empty = capture();
+    expect(await runCli(["runs", "--config", configPath, "--json"], empty.io)).toBe(0);
+    expect(JSON.parse(empty.stdout.join(""))).toMatchObject({
+      schemaVersion: "phase1-cli-runs-v1",
+      workflowId: "loaded-fixture",
+      order: "createdAt-desc-id-asc",
+      totalMatched: 0,
+      truncated: false,
+      runs: [],
+    });
+
+    const inputs = await inputFile({});
+    const first = capture();
+    expect(
+      await runCli(["run", "--config", configPath, "--inputs", inputs, "--json"], first.io),
+    ).toBe(0);
+    const firstId = (JSON.parse(first.stdout.join("")) as { runId: string }).runId;
+    const second = capture();
+    expect(
+      await runCli(
+        ["run", "--config", configPath, "--inputs", inputs, "--baseline", firstId, "--json"],
+        second.io,
+      ),
+    ).toBe(0);
+    const secondId = (JSON.parse(second.stdout.join("")) as { runId: string }).runId;
+
+    const limited = capture();
+    expect(
+      await runCli(["runs", "--config", configPath, "--limit", "1", "--json"], limited.io),
+    ).toBe(0);
+    expect(JSON.parse(limited.stdout.join(""))).toMatchObject({
+      limit: 1,
+      totalMatched: 2,
+      truncated: true,
+      runs: [{ runId: secondId, baselineRunId: firstId, stageCount: 1 }],
+    });
+
+    const human = capture();
+    expect(await runCli(["runs", "--config", configPath, "--limit", "1"], human.io)).toBe(0);
+    expect(human.stdout.join("")).toContain("Showing: 1 of 2");
+    expect(human.stdout.join("")).toContain(secondId);
+    expect(human.stdout.join("")).toContain("Increase --limit");
+  });
+
+  it("rejects invalid run-list limits and command-specific options", async () => {
+    const invalidLimit = capture();
+    expect(await runCli(["runs", "--config", configPath, "--limit", "0"], invalidLimit.io)).toBe(2);
+    expect(invalidLimit.stderr.join("")).toContain("positive integer");
+
+    const runOnlyOption = capture();
+    expect(
+      await runCli(["runs", "--config", configPath, "--baseline", "run_invalid"], runOnlyOption.io),
+    ).toBe(2);
+    expect(runOnlyOption.stderr.join("")).toContain("accepts only --config, --limit, and --json");
+  });
+
   it("rejects non-object inputs and usage errors without running", async () => {
     const inputs = await inputFile([]);
     const invalidInput = capture();
@@ -252,6 +309,7 @@ describe("run CLI", () => {
     expect(output.stdout.join("")).toContain("abilitybench run --inputs <file>");
     expect(output.stdout.join("")).toContain("abilitybench inspect <run-id>");
     expect(output.stdout.join("")).toContain("abilitybench diff <run-a> <run-b>");
+    expect(output.stdout.join("")).toContain("abilitybench runs");
     expect(output.stderr).toEqual([]);
   });
 });

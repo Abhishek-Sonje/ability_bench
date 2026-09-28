@@ -16,12 +16,14 @@ Usage:
   abilitybench run --inputs <file> [options]
   abilitybench inspect <run-id> [options]
   abilitybench diff <run-a> <run-b> [options]
+  abilitybench runs [options]
 
 Options:
   --config <file>       Config file (default: ./abilitybench.config.ts)
   --inputs <file>       Required strict-JSON input object
   --baseline <run-id>   Explicit immutable baseline; omit for a full run
   --invalidate <stage>  Force one stage to execute; repeat for multiple stages
+  --limit <count>       Maximum runs to list (default: 20, maximum: 1000)
   --json                Print a machine-readable result
   --help                Show this help
 `;
@@ -44,7 +46,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (command === "run") return await runCommand(parsed, io);
     if (command === "inspect") return await inspectCommand(parsed, io);
     if (command === "diff") return await diffCommand(parsed, io);
-    throw new CliUsageError('Expected the command "run", "inspect", or "diff".');
+    if (command === "runs") return await runsCommand(parsed, io);
+    throw new CliUsageError('Expected the command "run", "inspect", "diff", or "runs".');
   } catch (error: unknown) {
     const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     io.stderr(`${message}\n`);
@@ -67,6 +70,7 @@ function parseCliArgs(argv: readonly string[]) {
       inputs: { type: "string" },
       invalidate: { type: "string", multiple: true },
       json: { type: "boolean" },
+      limit: { type: "string" },
     },
   });
 }
@@ -77,6 +81,9 @@ async function runCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
   }
   if (parsed.values.inputs === undefined) {
     throw new CliUsageError('The "run" command requires --inputs <file>.');
+  }
+  if (parsed.values.limit !== undefined) {
+    throw new CliUsageError('The "run" command does not accept --limit.');
   }
 
   const configPath = resolve(io.cwd, parsed.values.config ?? "abilitybench.config.ts");
@@ -106,7 +113,8 @@ async function inspectCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
   if (
     parsed.values.inputs !== undefined ||
     parsed.values.baseline !== undefined ||
-    parsed.values.invalidate !== undefined
+    parsed.values.invalidate !== undefined ||
+    parsed.values.limit !== undefined
   ) {
     throw new CliUsageError(
       'The "inspect" command accepts only --config, --json, and exactly one <run-id>.',
@@ -138,7 +146,8 @@ async function diffCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
   if (
     parsed.values.inputs !== undefined ||
     parsed.values.baseline !== undefined ||
-    parsed.values.invalidate !== undefined
+    parsed.values.invalidate !== undefined ||
+    parsed.values.limit !== undefined
   ) {
     throw new CliUsageError(
       'The "diff" command accepts only --config, --json, and exactly two run IDs.',
@@ -168,6 +177,44 @@ async function diffCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
     parsed.values.json === true ? `${JSON.stringify(diff, null, 2)}\n` : diffHumanResult(diff),
   );
   return 0;
+}
+
+async function runsCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
+  if (parsed.positionals.length !== 1) {
+    throw new CliUsageError('The "runs" command does not accept positional arguments.');
+  }
+  if (
+    parsed.values.inputs !== undefined ||
+    parsed.values.baseline !== undefined ||
+    parsed.values.invalidate !== undefined
+  ) {
+    throw new CliUsageError('The "runs" command accepts only --config, --limit, and --json.');
+  }
+
+  const limit = parseRunLimit(parsed.values.limit);
+  const loaded = await loadWorkflowConfig(
+    resolve(io.cwd, parsed.values.config ?? "abilitybench.config.ts"),
+  );
+  const matching = (await new FileRunManifestStore(loaded.storageDir).list()).filter(
+    ({ workflowId }) => workflowId === loaded.workflow.id,
+  );
+  const result = runsResult(loaded.workflow.id, matching, limit);
+  io.stdout(
+    parsed.values.json === true ? `${JSON.stringify(result, null, 2)}\n` : runsHumanResult(result),
+  );
+  return 0;
+}
+
+function parseRunLimit(value: string | undefined): number {
+  if (value === undefined) return 20;
+  if (!/^[1-9][0-9]*$/.test(value)) {
+    throw new CliUsageError('The "runs" --limit must be a positive integer no greater than 1000.');
+  }
+  const limit = Number(value);
+  if (!Number.isSafeInteger(limit) || limit > 1000) {
+    throw new CliUsageError('The "runs" --limit must be a positive integer no greater than 1000.');
+  }
+  return limit;
 }
 
 async function loadProjectManifest(
@@ -300,6 +347,44 @@ function diffHumanResult(diff: RunDiff): string {
     const details = stage.changedFields.length === 0 ? "" : `: ${stage.changedFields.join(", ")}`;
     lines.push(`${stage.kind.toUpperCase().padEnd(9)} ${stage.stageId}${details}`);
   }
+  return `${lines.join("\n")}\n`;
+}
+
+function runsResult(workflowId: string, manifests: readonly FinalizedRunManifest[], limit: number) {
+  return {
+    schemaVersion: "phase1-cli-runs-v1" as const,
+    workflowId,
+    order: "createdAt-desc-id-asc" as const,
+    limit,
+    totalMatched: manifests.length,
+    truncated: manifests.length > limit,
+    runs: manifests.slice(0, limit).map((manifest) => ({
+      runId: manifest.id,
+      manifestHash: manifest.manifestHash,
+      baselineRunId: manifest.baselineRunId,
+      createdAt: manifest.createdAt,
+      completedAt: manifest.completedAt,
+      executionStatus: manifest.executionStatus,
+      evaluationStatus: manifest.evaluationStatus,
+      stageCount: manifest.stages.length,
+    })),
+  };
+}
+
+function runsHumanResult(result: ReturnType<typeof runsResult>): string {
+  const lines = [
+    `Runs: ${result.workflowId}`,
+    `Order: ${result.order}`,
+    `Showing: ${result.runs.length} of ${result.totalMatched}`,
+    "",
+  ];
+  for (const run of result.runs) {
+    lines.push(
+      `${run.createdAt} ${run.runId} [${run.executionStatus}/${run.evaluationStatus}] stages=${run.stageCount} baseline=${run.baselineRunId ?? "none"}`,
+    );
+  }
+  if (result.runs.length === 0) lines.push("No runs found.");
+  if (result.truncated) lines.push("", `Increase --limit to show more runs (maximum ${1000}).`);
   return `${lines.join("\n")}\n`;
 }
 

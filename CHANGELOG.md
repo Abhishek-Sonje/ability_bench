@@ -39,6 +39,8 @@ not yet publish versioned releases.
   versioned JSON output.
 - Deterministic `abilitybench diff <run-a> <run-b>` comparisons with graph-evolution support,
   canonical persisted-field comparisons, and a public pure manifest-diff API.
+- Bounded `abilitybench runs` discovery with integrity verification, deterministic ordering,
+  truncation metadata, and no implicit baseline selection.
 - Phase 1 CLI contract documenting exit statuses and the decision to defer SQLite until query
   requirements justify it.
 - Phase 0 execution contract.

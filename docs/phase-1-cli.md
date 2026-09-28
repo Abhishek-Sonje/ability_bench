@@ -7,10 +7,12 @@ Phase 1 begins with a thin local CLI over the verified execution engine:
     abilitybench run --inputs <file>
     abilitybench inspect <run-id>
     abilitybench diff <run-a> <run-b>
+    abilitybench runs
 
-This slice does not add SQLite. Immutable run manifests already provide correct baseline lookup,
-and the CLI currently performs no cross-run search, filtering, or aggregation that justifies a
-mutable index. SQLite should be introduced only when a measured query requirement appears.
+This slice does not add SQLite. Exact lookup uses immutable manifests, while the bounded local run
+listing performs a simple integrity-checked filesystem scan. That scan is intentionally O(number
+of stored runs). SQLite should be introduced only when measured store size or filtering and
+aggregation requirements make the scan inadequate.
 
 LLM integration, evaluations, UI, tool replay, cost tracking, implicit baseline selection, remote
 caches, and cloud features remain out of scope for this slice.
@@ -61,6 +63,24 @@ JSON output uses `phase1-run-diff-v1` and includes run identities, summary count
 names, and the before/after stage records. The command performs no run discovery, implicit
 selection, or mutable indexing.
 
+### Runs
+
+    abilitybench runs [--config <file>] [--limit <count>] [--json]
+
+Run discovery enumerates canonical manifest filenames, verifies every discovered manifest, filters
+to the configured workflow, and sorts by `createdAt` descending with run ID ascending as the stable
+tie-breaker. The default limit is `20`; accepted limits are positive integers no greater than
+`1000`. Machine output uses `phase1-cli-runs-v1` and reports `totalMatched` and `truncated` so
+callers can distinguish a complete result from a bounded view.
+
+The ordering is display-only. It must never be used internally to select a baseline, and the CLI
+still has no `--latest` behavior. A corrupt canonical run file fails the entire listing rather than
+silently disappearing. Non-run files and interrupted temporary files are ignored.
+
+This scan is suitable for a small developer-local store, not an unbounded history service. Before
+adding richer filters, pagination, or aggregate queries, the storage strategy must be reconsidered;
+that is the point at which SQLite may become the simpler design.
+
 ## Output and exit status
 
 Human output names the run, baseline, run status, and every stage's final decision, execution
@@ -97,6 +117,8 @@ The command tests cover:
 - missing-run and inspect-option rejection
 - exact two-run diffs, graph additions/removals, and execute-to-reuse changes
 - deterministic changed-field ordering and diff arity rejection
+- empty and populated bounded run listings with stable ordering and truncation metadata
+- invalid listing limits and command-specific option rejection
 - the built executable against the six-stage release-readiness example
 
 The release-readiness workflow was verified through a first CLI run followed by a second run that

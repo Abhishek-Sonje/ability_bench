@@ -96,6 +96,14 @@ node dist/cli.js diff run_<old-digest> run_<new-digest> --config ./abilitybench.
 
 The diff reports graph additions and removals plus every persisted field changed for shared stages.
 
+List recent verified runs without implicitly selecting a baseline:
+
+```bash
+node dist/cli.js runs --config ./abilitybench.config.ts --limit 20
+```
+
+Listing is bounded and deterministic. Any baseline passed to `run` must still be named explicitly.
+
 ## Development
 
 Requirements:

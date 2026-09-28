@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { link, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { link, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import type { ArtifactStore } from "./artifact-store.js";
@@ -8,6 +8,7 @@ import { type ArtifactEnvelope, canonicalizeJson, decodeArtifact } from "./seria
 
 const ARTIFACT_HASH_PATTERN = /^sha256:([a-f0-9]{64})$/;
 const RUN_ID_PATTERN = /^run_([a-f0-9]{64})$/;
+const RUN_FILENAME_PATTERN = /^(run_[a-f0-9]{64})\.json$/;
 
 export type PersistenceErrorCode =
   | "content_collision"
@@ -145,6 +146,32 @@ export class FileRunManifestStore {
     const path = this.#pathForRun(manifest.id);
     const bytes = new TextEncoder().encode(canonicalizeJson(manifest));
     await writeImmutable(path, bytes, manifest.id);
+  }
+
+  async list(): Promise<readonly FinalizedRunManifest[]> {
+    let filenames: string[];
+    try {
+      filenames = await readdir(join(this.#root, "runs"));
+    } catch (error: unknown) {
+      if (isNodeError(error) && error.code === "ENOENT") return Object.freeze([]);
+      throw new PersistenceError("read_failed", "Unable to list stored runs.", error);
+    }
+
+    const manifests: FinalizedRunManifest[] = [];
+    for (const filename of filenames.sort()) {
+      const runId = RUN_FILENAME_PATTERN.exec(filename)?.[1];
+      if (runId === undefined) continue;
+      const manifest = await this.get(runId);
+      if (manifest === undefined) {
+        throw new PersistenceError("read_failed", `Run "${runId}" disappeared while listing.`);
+      }
+      manifests.push(manifest);
+    }
+    manifests.sort(
+      (left, right) =>
+        right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id),
+    );
+    return Object.freeze(manifests);
   }
 
   #pathForRun(runId: string): string {

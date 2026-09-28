@@ -25,7 +25,11 @@ async function temporaryRoot(): Promise<string> {
   return root;
 }
 
-async function manifestFixture(storageRoot: string) {
+async function manifestFixture(
+  storageRoot: string,
+  createdAt = "2026-09-23T00:00:00.000Z",
+  completedAt = "2026-09-23T00:00:01.000Z",
+) {
   const workflowRoot = join(storageRoot, "project");
   await mkdir(workflowRoot, { recursive: true });
   await writeFile(join(workflowRoot, "stage.ts"), "v1\n", "utf8");
@@ -59,8 +63,8 @@ async function manifestFixture(storageRoot: string) {
   return finalizeRunManifest({
     workflow,
     execution,
-    createdAt: "2026-09-23T00:00:00.000Z",
-    completedAt: "2026-09-23T00:00:01.000Z",
+    createdAt,
+    completedAt,
   });
 }
 
@@ -160,6 +164,32 @@ describe("filesystem run-manifest storage", () => {
     );
 
     await expect(store.get(manifest.id)).rejects.toMatchObject({ code: "corrupt_manifest" });
+    await expect(store.list()).rejects.toMatchObject({ code: "corrupt_manifest" });
     await expect(store.get("../outside")).rejects.toMatchObject({ code: "invalid_run_id" });
+  });
+
+  it("lists verified manifests in deterministic newest-first order", async () => {
+    const root = await temporaryRoot();
+    const store = new FileRunManifestStore(root);
+    expect(await store.list()).toEqual([]);
+
+    const older = await manifestFixture(
+      root,
+      "2026-09-23T00:00:00.000Z",
+      "2026-09-23T00:00:01.000Z",
+    );
+    const newer = await manifestFixture(
+      root,
+      "2026-09-24T00:00:00.000Z",
+      "2026-09-24T00:00:01.000Z",
+    );
+    await store.put(older);
+    await store.put(newer);
+    await writeFile(join(root, "runs", ".tmp-orphan"), "ignored", "utf8");
+
+    const listed = await store.list();
+    expect(listed.map(({ id }) => id)).toEqual([newer.id, older.id]);
+    expect(Object.isFrozen(listed)).toBe(true);
+    expect(listed.every((manifest) => Object.isFrozen(manifest))).toBe(true);
   });
 });
