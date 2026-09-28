@@ -65,6 +65,9 @@ export {
   verifyRunManifest,
 } from "./run-manifest.js";
 export {
+  type PlanWorkflowRunOptions,
+  type PlanWorkflowRunResult,
+  planWorkflowRun,
   RunWorkflowError,
   type RunWorkflowErrorCode,
   type RunWorkflowOptions,

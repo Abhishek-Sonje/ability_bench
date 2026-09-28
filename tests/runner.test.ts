@@ -1,10 +1,15 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { defineWorkflow, FileRunManifestStore, runWorkflow } from "../src/index.js";
+import {
+  defineWorkflow,
+  FileRunManifestStore,
+  planWorkflowRun,
+  runWorkflow,
+} from "../src/index.js";
 
 const roots: string[] = [];
 
@@ -46,6 +51,57 @@ async function fixture() {
 }
 
 describe("runWorkflow", () => {
+  it("plans without executing stages or creating storage", async () => {
+    const { root, workflow, calls } = await fixture();
+    const result = await planWorkflowRun(workflow, {
+      inputs: {},
+      baseline: null,
+      environment: {},
+    });
+
+    expect(calls).toEqual([]);
+    expect(result.plan.decisions).toHaveLength(6);
+    expect(
+      result.plan.decisions.every(
+        ({ decision, reason }) => decision === "execute" && reason === "no_baseline",
+      ),
+    ).toBe(true);
+    await expect(stat(join(root, ".abilitybench"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("plans against a verified baseline without persisting a candidate", async () => {
+    const { root, workflow, calls } = await fixture();
+    const baseline = await runWorkflow(workflow, { inputs: {}, baseline: null, environment: {} });
+    calls.length = 0;
+    await writeFile(join(root, "src", "left.ts"), "left-v2\n", "utf8");
+    const store = new FileRunManifestStore(join(root, ".abilitybench"));
+    const beforeIds = (await store.list()).map(({ id }) => id);
+
+    const result = await planWorkflowRun(workflow, {
+      inputs: {},
+      baseline: { runId: baseline.manifest.id },
+      environment: {},
+    });
+
+    expect(calls).toEqual([]);
+    expect((await store.list()).map(({ id }) => id)).toEqual(beforeIds);
+    expect(
+      Object.fromEntries(
+        result.plan.decisions.map(({ stageId, decision, reason }) => [
+          stageId,
+          { decision, reason },
+        ]),
+      ),
+    ).toMatchObject({
+      seed: { decision: "reuse", reason: "fingerprint_match" },
+      left: { decision: "execute", reason: "fingerprint_changed" },
+      right: { decision: "reuse", reason: "fingerprint_match" },
+      join: { decision: "execute", reason: "dependency_executed" },
+      report: { decision: "execute", reason: "dependency_executed" },
+      independent: { decision: "reuse", reason: "fingerprint_match" },
+    });
+  });
+
   it("persists a full run and reuses it from one explicit baseline", async () => {
     const { root, workflow, calls } = await fixture();
     const first = await runWorkflow(workflow, { inputs: {}, baseline: null, environment: {} });

@@ -41,6 +41,8 @@ not yet publish versioned releases.
   canonical persisted-field comparisons, and a public pure manifest-diff API.
 - Bounded `abilitybench runs` discovery with integrity verification, deterministic ordering,
   truncation metadata, and no implicit baseline selection.
+- Read-only `abilitybench plan` and `planWorkflowRun()` APIs that share run preparation and explain
+  conservative decisions without executing stages or writing artifacts and manifests.
 - Phase 1 CLI contract documenting exit statuses and the decision to defer SQLite until query
   requirements justify it.
 - Phase 0 execution contract.

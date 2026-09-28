@@ -5,6 +5,7 @@
 Phase 1 begins with a thin local CLI over the verified execution engine:
 
     abilitybench run --inputs <file>
+    abilitybench plan --inputs <file>
     abilitybench inspect <run-id>
     abilitybench diff <run-a> <run-b>
     abilitybench runs
@@ -32,6 +33,22 @@ Options:
 
 There is deliberately no `--latest` option. Filesystem ordering, timestamps, or mutable pointers
 must not choose a baseline implicitly.
+
+### Plan
+
+    abilitybench plan --inputs <file> [--baseline <run-id>] [--invalidate <stage>] [--json]
+
+Plan uses the same canonical input snapshot, declared environment snapshot, storage containment
+checks, baseline integrity and artifact verification, watched-file hashing, fingerprints, and
+invalidation algorithm as `run`. It does not invoke stage functions, write artifacts, or create a
+run manifest. Human output explains every stage decision; JSON output uses
+`phase1-cli-plan-v1` and includes summary counts and the complete `WorkflowPlan` decisions.
+
+A plan is predictive, not a locked execution receipt. Files, environment values, artifacts, or
+inputs may change after it is printed, and a later `run` computes a fresh plan. Planning validates
+canonical JSON but does not invoke stage wrappers, so typed stage-input parsing and other runtime
+failures can still occur during execution. A plan must never be treated as proof that a run will
+succeed.
 
 ### Inspect
 
@@ -110,6 +127,8 @@ The command tests cover:
 
 - first execution with no baseline
 - full reuse from one explicitly selected baseline
+- read-only planning with and without a baseline
+- proof that planning neither creates storage nor adds or mutates run manifests
 - human and versioned JSON output
 - non-object input rejection
 - usage errors and help without project loading

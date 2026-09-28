@@ -5,15 +5,17 @@ import { parseArgs } from "node:util";
 import { loadWorkflowConfig } from "./config.js";
 import type { WorkflowExecutionResult } from "./execution.js";
 import { FileRunManifestStore } from "./filesystem-store.js";
+import type { WorkflowPlan } from "./planning.js";
 import { diffRunManifests, type RunDiff } from "./run-diff.js";
 import type { FinalizedRunManifest } from "./run-manifest.js";
-import { runWorkflow } from "./runner.js";
+import { planWorkflowRun, runWorkflow } from "./runner.js";
 import type { JsonObject } from "./types.js";
 
 const HELP = `AbilityBench
 
 Usage:
   abilitybench run --inputs <file> [options]
+  abilitybench plan --inputs <file> [options]
   abilitybench inspect <run-id> [options]
   abilitybench diff <run-a> <run-b> [options]
   abilitybench runs [options]
@@ -44,10 +46,11 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     const command = parsed.positionals[0];
     if (command === "run") return await runCommand(parsed, io);
+    if (command === "plan") return await planCommand(parsed, io);
     if (command === "inspect") return await inspectCommand(parsed, io);
     if (command === "diff") return await diffCommand(parsed, io);
     if (command === "runs") return await runsCommand(parsed, io);
-    throw new CliUsageError('Expected the command "run", "inspect", "diff", or "runs".');
+    throw new CliUsageError('Expected the command "run", "plan", "inspect", "diff", or "runs".');
   } catch (error: unknown) {
     const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     io.stderr(`${message}\n`);
@@ -104,6 +107,35 @@ async function runCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
       : humanResult(result.execution, result.manifest.id),
   );
   return result.execution.executionStatus === "completed" ? 0 : 1;
+}
+
+async function planCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
+  if (parsed.positionals.length !== 1) {
+    throw new CliUsageError('The "plan" command does not accept positional arguments.');
+  }
+  if (parsed.values.inputs === undefined) {
+    throw new CliUsageError('The "plan" command requires --inputs <file>.');
+  }
+  if (parsed.values.limit !== undefined) {
+    throw new CliUsageError('The "plan" command does not accept --limit.');
+  }
+
+  const configPath = resolve(io.cwd, parsed.values.config ?? "abilitybench.config.ts");
+  const inputPath = resolve(io.cwd, parsed.values.inputs);
+  const inputs = await readInputObject(inputPath);
+  const loaded = await loadWorkflowConfig(configPath);
+  const result = await planWorkflowRun(loaded.workflow, {
+    inputs,
+    baseline: parsed.values.baseline === undefined ? null : { runId: parsed.values.baseline },
+    invalidate: parsed.values.invalidate ?? [],
+    environment: io.environment,
+    storageDir: loaded.storageDir,
+  });
+  const output = planResult(result.plan, result.storageDir);
+  io.stdout(
+    parsed.values.json === true ? `${JSON.stringify(output, null, 2)}\n` : planHumanResult(output),
+  );
+  return 0;
 }
 
 async function inspectCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
@@ -298,6 +330,40 @@ function humanResult(execution: WorkflowExecutionResult, runId: string): string 
       lines.push(`        ${JSON.stringify(stage.decisionDetails)}`);
     }
     if (stage.error !== null) lines.push(`        ${stage.error.name}: ${stage.error.message}`);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+function planResult(plan: WorkflowPlan, storageDir: string) {
+  const executeCount = plan.decisions.filter(({ decision }) => decision === "execute").length;
+  return {
+    schemaVersion: "phase1-cli-plan-v1" as const,
+    workflowId: plan.workflowId,
+    baselineRunId: plan.baselineRunId,
+    baselineManifestHash: plan.baselineManifestHash,
+    storageDir,
+    summary: {
+      execute: executeCount,
+      reuse: plan.decisions.length - executeCount,
+    },
+    decisions: plan.decisions,
+  };
+}
+
+function planHumanResult(result: ReturnType<typeof planResult>): string {
+  const lines = [
+    `Plan: ${result.workflowId}`,
+    `Baseline: ${result.baselineRunId ?? "none"}`,
+    `Summary: ${result.summary.execute} execute, ${result.summary.reuse} reuse`,
+    "",
+  ];
+  for (const decision of result.decisions) {
+    lines.push(
+      `${decision.decision.toUpperCase().padEnd(7)} ${decision.stageId} ${decision.reason}`,
+    );
+    if (Object.keys(decision.details).length > 0) {
+      lines.push(`        ${JSON.stringify(decision.details)}`);
+    }
   }
   return `${lines.join("\n")}\n`;
 }

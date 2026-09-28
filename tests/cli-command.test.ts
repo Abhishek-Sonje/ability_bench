@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -118,6 +118,43 @@ describe("run CLI", () => {
     const output = capture();
     expect(await runCli(["run", "--config", configPath, "--inputs", inputs], output.io)).toBe(0);
     expect(output.stdout.join("")).toMatch(/EXECUTE source \[succeeded\] no_baseline/);
+  });
+
+  it("prints a predictive plan without creating or changing run storage", async () => {
+    const inputs = await inputFile({});
+    const initial = capture();
+    expect(
+      await runCli(["plan", "--config", configPath, "--inputs", inputs, "--json"], initial.io),
+    ).toBe(0);
+    expect(JSON.parse(initial.stdout.join(""))).toMatchObject({
+      schemaVersion: "phase1-cli-plan-v1",
+      workflowId: "loaded-fixture",
+      baselineRunId: null,
+      summary: { execute: 1, reuse: 0 },
+      decisions: [{ stageId: "source", decision: "execute", reason: "no_baseline" }],
+    });
+    await expect(stat(storagePath)).rejects.toMatchObject({ code: "ENOENT" });
+
+    const run = capture();
+    expect(
+      await runCli(["run", "--config", configPath, "--inputs", inputs, "--json"], run.io),
+    ).toBe(0);
+    const runId = (JSON.parse(run.stdout.join("")) as { runId: string }).runId;
+    const beforeRuns = await readdir(join(storagePath, "runs"));
+    const before = await stat(join(storagePath, "runs", `${runId}.json`));
+
+    const planned = capture();
+    expect(
+      await runCli(
+        ["plan", "--config", configPath, "--inputs", inputs, "--baseline", runId],
+        planned.io,
+      ),
+    ).toBe(0);
+    expect(planned.stdout.join("")).toContain("Summary: 0 execute, 1 reuse");
+    expect(planned.stdout.join("")).toContain("REUSE   source fingerprint_match");
+    expect(await readdir(join(storagePath, "runs"))).toEqual(beforeRuns);
+    const after = await stat(join(storagePath, "runs", `${runId}.json`));
+    expect(after.mtimeMs).toBe(before.mtimeMs);
   });
 
   it("inspects one exact, integrity-checked run", async () => {
@@ -307,6 +344,7 @@ describe("run CLI", () => {
     const output = capture();
     expect(await runCli(["--help"], output.io)).toBe(0);
     expect(output.stdout.join("")).toContain("abilitybench run --inputs <file>");
+    expect(output.stdout.join("")).toContain("abilitybench plan --inputs <file>");
     expect(output.stdout.join("")).toContain("abilitybench inspect <run-id>");
     expect(output.stdout.join("")).toContain("abilitybench diff <run-a> <run-b>");
     expect(output.stdout.join("")).toContain("abilitybench runs");

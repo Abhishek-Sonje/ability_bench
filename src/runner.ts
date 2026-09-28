@@ -12,13 +12,21 @@ import {
 import { canonicalizeJson } from "./serialization.js";
 import type { BuiltWorkflow, JsonObject } from "./types.js";
 
-export interface RunWorkflowOptions {
+export interface PlanWorkflowRunOptions {
   readonly inputs: JsonObject;
   readonly baseline: { readonly runId: string } | null;
   readonly invalidate?: readonly string[];
   readonly environment?: Readonly<Record<string, string | undefined>>;
   readonly storageDir?: string;
+}
+
+export interface RunWorkflowOptions extends PlanWorkflowRunOptions {
   readonly failureMode?: "stop";
+}
+
+export interface PlanWorkflowRunResult {
+  readonly plan: WorkflowPlan;
+  readonly storageDir: string;
 }
 
 export interface RunWorkflowResult {
@@ -44,11 +52,55 @@ export class RunWorkflowError extends Error {
   }
 }
 
+interface PreparedWorkflowRun extends PlanWorkflowRunResult {
+  readonly inputs: JsonObject;
+  readonly environment: Readonly<Record<string, string | undefined>>;
+  readonly artifacts: FileArtifactStore;
+  readonly manifests: FileRunManifestStore;
+}
+
+/** Computes a predictive plan without executing stages or writing run state. */
+export async function planWorkflowRun(
+  workflow: BuiltWorkflow,
+  options: PlanWorkflowRunOptions,
+): Promise<PlanWorkflowRunResult> {
+  const prepared = await prepareWorkflowRun(workflow, options);
+  return Object.freeze({ plan: prepared.plan, storageDir: prepared.storageDir });
+}
+
 /** Runs one candidate against exactly the baseline selected by the caller. */
 export async function runWorkflow(
   workflow: BuiltWorkflow,
   options: RunWorkflowOptions,
 ): Promise<RunWorkflowResult> {
+  const prepared = await prepareWorkflowRun(workflow, options);
+  const createdAt = new Date().toISOString();
+  const execution = await executeWorkflow({
+    workflow,
+    plan: prepared.plan,
+    inputs: prepared.inputs,
+    environment: prepared.environment,
+    artifacts: prepared.artifacts,
+  });
+  const manifest = finalizeRunManifest({
+    workflow,
+    execution,
+    createdAt,
+    completedAt: new Date().toISOString(),
+  });
+  await prepared.manifests.put(manifest);
+  return Object.freeze({
+    manifest,
+    plan: prepared.plan,
+    execution,
+    storageDir: prepared.storageDir,
+  });
+}
+
+async function prepareWorkflowRun(
+  workflow: BuiltWorkflow,
+  options: PlanWorkflowRunOptions,
+): Promise<PreparedWorkflowRun> {
   let inputs: JsonObject;
   try {
     const snapshot: unknown = JSON.parse(canonicalizeJson(options.inputs));
@@ -115,20 +167,5 @@ export async function runWorkflow(
     baseline,
     invalidate: options.invalidate ?? [],
   });
-  const createdAt = new Date().toISOString();
-  const execution = await executeWorkflow({
-    workflow,
-    plan,
-    inputs,
-    environment,
-    artifacts,
-  });
-  const manifest = finalizeRunManifest({
-    workflow,
-    execution,
-    createdAt,
-    completedAt: new Date().toISOString(),
-  });
-  await manifests.put(manifest);
-  return Object.freeze({ manifest, plan, execution, storageDir });
+  return Object.freeze({ inputs, environment, storageDir, artifacts, manifests, plan });
 }

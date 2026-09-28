@@ -80,6 +80,15 @@ Pass `--baseline run_<digest>` to reuse from exactly that immutable run. Use `--
 <stage>` one or more times for manual invalidation, or `--json` for versioned machine output.
 The CLI never chooses a “latest” baseline implicitly.
 
+Preview the same conservative decisions without executing or persisting a candidate:
+
+```bash
+node dist/cli.js plan --config ./abilitybench.config.ts --inputs ./inputs.json --baseline run_<digest>
+```
+
+Plans are predictive snapshots. A later `run` always plans again against then-current inputs,
+environment values, files, and artifacts.
+
 Inspect one stored run by its exact immutable ID:
 
 ```bash
