@@ -191,16 +191,23 @@ describe("run CLI", () => {
         missing.io,
       ),
     ).toBe(2);
-    expect(missing.stderr.join("")).toContain("was not found");
+    expect(missing.stdout).toEqual([]);
+    expect(JSON.parse(missing.stderr.join(""))).toMatchObject({
+      schemaVersion: "phase1-cli-error-v1",
+      error: { name: "CliLookupError", code: "run_not_found" },
+    });
 
     const invalidOptions = capture();
     expect(
       await runCli(
-        ["inspect", `run_${"0".repeat(64)}`, "--config", configPath, "--baseline", "x"],
+        ["inspect", `run_${"0".repeat(64)}`, "--config", configPath, "--baseline", "x", "--json"],
         invalidOptions.io,
       ),
     ).toBe(2);
-    expect(invalidOptions.stderr.join("")).toContain("accepts only --config, --json");
+    expect(JSON.parse(invalidOptions.stderr.join(""))).toMatchObject({
+      schemaVersion: "phase1-cli-error-v1",
+      error: { code: "invalid_arguments" },
+    });
   });
 
   it("diffs two exact runs in machine and human formats", async () => {
@@ -299,7 +306,7 @@ describe("run CLI", () => {
     expect(
       await runCli(["runs", "--config", configPath, "--baseline", "run_invalid"], runOnlyOption.io),
     ).toBe(2);
-    expect(runOnlyOption.stderr.join("")).toContain("accepts only --config, --limit, and --json");
+    expect(runOnlyOption.stderr.join("")).toContain("Unknown option '--baseline'");
   });
 
   it("rejects non-object inputs and usage errors without running", async () => {
@@ -313,6 +320,57 @@ describe("run CLI", () => {
     const invalidUsage = capture();
     expect(await runCli(["run"], invalidUsage.io)).toBe(2);
     expect(invalidUsage.stderr.join("")).toContain("requires --inputs");
+  });
+
+  it("emits versioned JSON errors for usage, input, and config failures", async () => {
+    const missingInput = capture();
+    expect(await runCli(["run", "--json"], missingInput.io)).toBe(2);
+    expect(missingInput.stdout).toEqual([]);
+    expect(JSON.parse(missingInput.stderr.join(""))).toMatchObject({
+      schemaVersion: "phase1-cli-error-v1",
+      error: { name: "CliUsageError", code: "invalid_usage" },
+    });
+
+    const inputs = await inputFile([]);
+    const invalidInput = capture();
+    expect(
+      await runCli(["run", "--config", configPath, "--inputs", inputs, "--json"], invalidInput.io),
+    ).toBe(2);
+    expect(JSON.parse(invalidInput.stderr.join(""))).toMatchObject({
+      schemaVersion: "phase1-cli-error-v1",
+      error: { name: "CliInputError", code: "input_not_object" },
+    });
+
+    const missingConfig = capture();
+    expect(
+      await runCli(
+        ["runs", "--config", join(fixtureRoot, "missing.config.ts"), "--json"],
+        missingConfig.io,
+      ),
+    ).toBe(2);
+    expect(JSON.parse(missingConfig.stderr.join(""))).toMatchObject({
+      schemaVersion: "phase1-cli-error-v1",
+      error: { name: "ConfigError", code: "config_not_found" },
+    });
+  });
+
+  it("rejects duplicate scalar options instead of choosing one silently", async () => {
+    const inputs = await inputFile({});
+    const output = capture();
+    expect(
+      await runCli(
+        ["run", "--config", configPath, "--inputs", inputs, "--inputs", inputs, "--json"],
+        output.io,
+      ),
+    ).toBe(2);
+    expect(JSON.parse(output.stderr.join(""))).toMatchObject({
+      schemaVersion: "phase1-cli-error-v1",
+      error: {
+        name: "CliUsageError",
+        code: "invalid_usage",
+        message: expect.stringContaining("--inputs"),
+      },
+    });
   });
 
   it("returns exit one when the workflow runs but a stage fails", async () => {

@@ -22,6 +22,11 @@ caches, and cloud features remain out of scope for this slice.
 
     abilitybench run --inputs <file> [options]
 
+The subcommand must be the first argument. Each subcommand has an independent option schema;
+options from another command are rejected during parsing. Scalar options may appear at most once.
+`--invalidate` is the only repeatable option. `--help` or `-h` prints help without loading a
+project.
+
 Options:
 
 - `--config <file>`: configuration path, defaulting to `./abilitybench.config.ts`.
@@ -106,6 +111,26 @@ status, reason code, and non-empty details.
 JSON output uses `phase1-cli-result-v1` and includes the same structured decisions plus artifact
 hashes and serialized errors.
 
+When `--json` is present and the command cannot produce its normal result, stderr contains exactly
+one `phase1-cli-error-v1` JSON document:
+
+```json
+{
+  "schemaVersion": "phase1-cli-error-v1",
+  "error": {
+    "name": "ConfigError",
+    "code": "config_not_found",
+    "message": "..."
+  }
+}
+```
+
+The envelope never contains a stack trace or nested cause. Stable AbilityBench domain codes pass
+through; parser failures use `invalid_arguments`, CLI contract failures use `invalid_usage`, input
+files use `input_read_failed`, `input_invalid_json`, or `input_not_object`, exact run lookup uses
+`run_not_found` or `run_workflow_mismatch`, and an otherwise unclassified failure uses
+`command_failed`. Human-mode errors remain plain stderr text.
+
 - Exit `0`: execution completed.
 - Exit `1`: the workflow ran but execution failed.
 - Exit `2`: usage, configuration, input, baseline-loading, or other command error.
@@ -138,6 +163,8 @@ The command tests cover:
 - deterministic changed-field ordering and diff arity rejection
 - empty and populated bounded run listings with stable ordering and truncation metadata
 - invalid listing limits and command-specific option rejection
+- versioned JSON errors across argument, input, configuration, and run-lookup failures
+- duplicate scalar-option rejection while repeated invalidation remains supported
 - the built executable against the six-stage release-readiness example
 
 The release-readiness workflow was verified through a first CLI run followed by a second run that

@@ -113,6 +113,9 @@ node dist/cli.js runs --config ./abilitybench.config.ts --limit 20
 
 Listing is bounded and deterministic. Any baseline passed to `run` must still be named explicitly.
 
+Every subcommand accepts only its documented options. With `--json`, command failures emit a
+versioned `phase1-cli-error-v1` document on stderr instead of human-formatted text.
+
 ## Development
 
 Requirements:

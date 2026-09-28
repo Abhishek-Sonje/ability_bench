@@ -9,6 +9,8 @@ not yet publish versioned releases.
 
 ### Changed
 
+- Parse each CLI subcommand against its own option schema, reject duplicate scalar options, and
+  emit versioned machine-readable error envelopes whenever `--json` is requested.
 - Reject storage paths and watched paths that escape the workflow root through symbolic links or junctions.
 - Snapshot run inputs and declared environment values; isolate stage data from callback mutations.
 - Recheck reuse before artifact load and reject noncanonical persisted JSON.

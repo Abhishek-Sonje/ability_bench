@@ -37,56 +37,113 @@ export interface CliIo {
   readonly stderr: (text: string) => void;
 }
 
+export interface CliErrorResult {
+  readonly schemaVersion: "phase1-cli-error-v1";
+  readonly error: {
+    readonly name: string;
+    readonly code: string;
+    readonly message: string;
+  };
+}
+
 export async function runCli(argv: readonly string[], io: CliIo): Promise<number> {
+  const wantsJson = argv.includes("--json");
   try {
-    const parsed = parseCliArgs(argv);
-    if (parsed.values.help === true) {
+    if (argv.includes("--help") || argv.includes("-h")) {
       io.stdout(HELP);
       return 0;
     }
-    const command = parsed.positionals[0];
+    const [command, ...commandArgs] = argv;
+    if (!isCliCommand(command)) {
+      throw new CliUsageError('Expected the command "run", "plan", "inspect", "diff", or "runs".');
+    }
+    const parsed = parseCliArgs(command, commandArgs);
     if (command === "run") return await runCommand(parsed, io);
     if (command === "plan") return await planCommand(parsed, io);
     if (command === "inspect") return await inspectCommand(parsed, io);
     if (command === "diff") return await diffCommand(parsed, io);
     if (command === "runs") return await runsCommand(parsed, io);
-    throw new CliUsageError('Expected the command "run", "plan", "inspect", "diff", or "runs".');
+    throw new CliUsageError(`Unsupported command: ${command satisfies never}`);
   } catch (error: unknown) {
-    const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-    io.stderr(`${message}\n`);
-    if (error instanceof CliUsageError) io.stderr("\nRun abilitybench --help for usage.\n");
+    if (wantsJson) {
+      io.stderr(`${JSON.stringify(machineError(error), null, 2)}\n`);
+    } else {
+      const message = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+      io.stderr(`${message}\n`);
+      if (error instanceof CliUsageError) io.stderr("\nRun abilitybench --help for usage.\n");
+    }
     return 2;
   }
 }
 
-type ParsedCli = ReturnType<typeof parseCliArgs>;
+type CliCommand = "run" | "plan" | "inspect" | "diff" | "runs";
 
-function parseCliArgs(argv: readonly string[]) {
-  return parseArgs({
-    args: [...argv],
+interface CliValues {
+  readonly baseline?: string;
+  readonly config?: string;
+  readonly inputs?: string;
+  readonly invalidate?: readonly string[];
+  readonly json?: boolean;
+  readonly limit?: string;
+}
+
+interface ParsedCli {
+  readonly positionals: readonly string[];
+  readonly values: CliValues;
+}
+
+function isCliCommand(value: string | undefined): value is CliCommand {
+  return (
+    value === "run" ||
+    value === "plan" ||
+    value === "inspect" ||
+    value === "diff" ||
+    value === "runs"
+  );
+}
+
+function parseCliArgs(command: CliCommand, args: readonly string[]): ParsedCli {
+  const common = {
+    config: { type: "string" as const },
+    json: { type: "boolean" as const },
+  };
+  const execution = {
+    ...common,
+    baseline: { type: "string" as const },
+    inputs: { type: "string" as const },
+    invalidate: { type: "string" as const, multiple: true },
+  };
+  const options =
+    command === "run" || command === "plan"
+      ? execution
+      : command === "runs"
+        ? { ...common, limit: { type: "string" as const } }
+        : common;
+  const parsed = parseArgs({
+    args: [...args],
     allowPositionals: true,
     strict: true,
-    options: {
-      baseline: { type: "string" },
-      config: { type: "string" },
-      help: { type: "boolean", short: "h" },
-      inputs: { type: "string" },
-      invalidate: { type: "string", multiple: true },
-      json: { type: "boolean" },
-      limit: { type: "string" },
-    },
+    options,
+    tokens: true,
   });
+  const optionCounts = new Map<string, number>();
+  for (const token of parsed.tokens) {
+    if (token.kind !== "option") continue;
+    const optionName: string = token.name;
+    if (optionName === "invalidate") continue;
+    const count = (optionCounts.get(optionName) ?? 0) + 1;
+    optionCounts.set(optionName, count);
+    if (count > 1) throw new CliUsageError(`Option "--${optionName}" may be provided only once.`);
+  }
+  return { positionals: parsed.positionals, values: parsed.values } as ParsedCli;
 }
 
 async function runCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
-  if (parsed.positionals.length !== 1) {
+  if (parsed.positionals.length !== 0) {
     throw new CliUsageError('The "run" command does not accept positional arguments.');
   }
   if (parsed.values.inputs === undefined) {
     throw new CliUsageError('The "run" command requires --inputs <file>.');
-  }
-  if (parsed.values.limit !== undefined) {
-    throw new CliUsageError('The "run" command does not accept --limit.');
   }
 
   const configPath = resolve(io.cwd, parsed.values.config ?? "abilitybench.config.ts");
@@ -110,14 +167,11 @@ async function runCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
 }
 
 async function planCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
-  if (parsed.positionals.length !== 1) {
+  if (parsed.positionals.length !== 0) {
     throw new CliUsageError('The "plan" command does not accept positional arguments.');
   }
   if (parsed.values.inputs === undefined) {
     throw new CliUsageError('The "plan" command requires --inputs <file>.');
-  }
-  if (parsed.values.limit !== undefined) {
-    throw new CliUsageError('The "plan" command does not accept --limit.');
   }
 
   const configPath = resolve(io.cwd, parsed.values.config ?? "abilitybench.config.ts");
@@ -139,24 +193,14 @@ async function planCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
 }
 
 async function inspectCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
-  if (parsed.positionals.length !== 2) {
+  if (parsed.positionals.length !== 1) {
     throw new CliUsageError('The "inspect" command requires exactly one <run-id>.');
-  }
-  if (
-    parsed.values.inputs !== undefined ||
-    parsed.values.baseline !== undefined ||
-    parsed.values.invalidate !== undefined ||
-    parsed.values.limit !== undefined
-  ) {
-    throw new CliUsageError(
-      'The "inspect" command accepts only --config, --json, and exactly one <run-id>.',
-    );
   }
 
   const loaded = await loadWorkflowConfig(
     resolve(io.cwd, parsed.values.config ?? "abilitybench.config.ts"),
   );
-  const runId = parsed.positionals[1] as string;
+  const runId = parsed.positionals[0] as string;
   const manifest = await loadProjectManifest(
     new FileRunManifestStore(loaded.storageDir),
     runId,
@@ -172,18 +216,8 @@ async function inspectCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
 }
 
 async function diffCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
-  if (parsed.positionals.length !== 3) {
+  if (parsed.positionals.length !== 2) {
     throw new CliUsageError('The "diff" command requires exactly two run IDs.');
-  }
-  if (
-    parsed.values.inputs !== undefined ||
-    parsed.values.baseline !== undefined ||
-    parsed.values.invalidate !== undefined ||
-    parsed.values.limit !== undefined
-  ) {
-    throw new CliUsageError(
-      'The "diff" command accepts only --config, --json, and exactly two run IDs.',
-    );
   }
 
   const loaded = await loadWorkflowConfig(
@@ -193,13 +227,13 @@ async function diffCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
   const [from, to] = await Promise.all([
     loadProjectManifest(
       store,
-      parsed.positionals[1] as string,
+      parsed.positionals[0] as string,
       loaded.workflow.id,
       loaded.storageDir,
     ),
     loadProjectManifest(
       store,
-      parsed.positionals[2] as string,
+      parsed.positionals[1] as string,
       loaded.workflow.id,
       loaded.storageDir,
     ),
@@ -212,15 +246,8 @@ async function diffCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
 }
 
 async function runsCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
-  if (parsed.positionals.length !== 1) {
+  if (parsed.positionals.length !== 0) {
     throw new CliUsageError('The "runs" command does not accept positional arguments.');
-  }
-  if (
-    parsed.values.inputs !== undefined ||
-    parsed.values.baseline !== undefined ||
-    parsed.values.invalidate !== undefined
-  ) {
-    throw new CliUsageError('The "runs" command accepts only --config, --limit, and --json.');
   }
 
   const limit = parseRunLimit(parsed.values.limit);
@@ -257,10 +284,11 @@ async function loadProjectManifest(
 ): Promise<FinalizedRunManifest> {
   const manifest = await store.get(runId);
   if (manifest === undefined) {
-    throw new Error(`Run "${runId}" was not found in "${storageDir}".`);
+    throw new CliLookupError("run_not_found", `Run "${runId}" was not found in "${storageDir}".`);
   }
   if (manifest.workflowId !== workflowId) {
-    throw new Error(
+    throw new CliLookupError(
+      "run_workflow_mismatch",
       `Run "${runId}" belongs to workflow "${manifest.workflowId}", not "${workflowId}".`,
     );
   }
@@ -268,9 +296,32 @@ async function loadProjectManifest(
 }
 
 class CliUsageError extends Error {
+  readonly code = "invalid_usage";
+
   constructor(message: string) {
     super(message);
     this.name = "CliUsageError";
+  }
+}
+
+class CliInputError extends Error {
+  constructor(
+    readonly code: "input_read_failed" | "input_invalid_json" | "input_not_object",
+    message: string,
+    sourceCause?: unknown,
+  ) {
+    super(message, sourceCause === undefined ? undefined : { cause: sourceCause });
+    this.name = "CliInputError";
+  }
+}
+
+class CliLookupError extends Error {
+  constructor(
+    readonly code: "run_not_found" | "run_workflow_mismatch",
+    message: string,
+  ) {
+    super(message);
+    this.name = "CliLookupError";
   }
 }
 
@@ -279,18 +330,34 @@ async function readInputObject(path: string): Promise<JsonObject> {
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(await readFile(path));
   } catch (error: unknown) {
-    throw new Error(`Unable to read input file "${path}".`, { cause: error });
+    throw new CliInputError("input_read_failed", `Unable to read input file "${path}".`, error);
   }
   let value: unknown;
   try {
     value = JSON.parse(text);
   } catch (error: unknown) {
-    throw new Error(`Input file "${path}" is not valid JSON.`, { cause: error });
+    throw new CliInputError("input_invalid_json", `Input file "${path}" is not valid JSON.`, error);
   }
   if (value === null || Array.isArray(value) || typeof value !== "object") {
-    throw new Error(`Input file "${path}" must contain a JSON object.`);
+    throw new CliInputError("input_not_object", `Input file "${path}" must contain a JSON object.`);
   }
   return value as JsonObject;
+}
+
+function machineError(error: unknown): CliErrorResult {
+  const name = error instanceof Error ? error.name : "Error";
+  const message = error instanceof Error ? error.message : String(error);
+  let code = "command_failed";
+  if (error !== null && typeof error === "object" && "code" in error) {
+    const candidate: unknown = error.code;
+    if (typeof candidate === "string") {
+      code = candidate.startsWith("ERR_PARSE_ARGS_") ? "invalid_arguments" : candidate;
+    }
+  }
+  return {
+    schemaVersion: "phase1-cli-error-v1",
+    error: { name, code, message },
+  };
 }
 
 function machineResult(result: Awaited<ReturnType<typeof runWorkflow>>) {
