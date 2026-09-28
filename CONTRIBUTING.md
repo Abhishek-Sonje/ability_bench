@@ -15,6 +15,10 @@ scope.
 4. Run `pnpm check`.
 5. Commit with a Conventional Commit message.
 
+Pull requests and pushes to `main` run the same gate on current GitHub-hosted Ubuntu and Windows
+runners. CI installs the project-pinned pnpm release from `packageManager`, uses the latest Node 24
+release, and requires the committed lockfile to remain authoritative.
+
 ## Commit convention
 
 Use `type(scope): summary`, for example:

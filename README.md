@@ -127,3 +127,6 @@ pnpm check
 ```
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for repository conventions and quality gates.
+
+The same `pnpm check` gate runs in CI on both Ubuntu and Windows so filesystem behavior is covered
+on POSIX and Windows hosts.

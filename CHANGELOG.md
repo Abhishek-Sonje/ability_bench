@@ -33,6 +33,8 @@ not yet publish versioned releases.
 
 ### Added
 
+- Read-only GitHub Actions CI across current Ubuntu and Windows runners with Node 24, the
+  project-pinned pnpm version, dependency caching, and frozen-lockfile enforcement.
 - Local `abilitybench run` command with explicit JSON inputs, explicit immutable baseline
   selection, repeated manual invalidation, human explanations, and versioned JSON output.
 - Exact `abilitybench inspect <run-id>` lookup with manifest integrity verification and human or
