@@ -9,11 +9,13 @@ This example models a small deterministic developer workflow:
 Build the package and run the first snapshot:
 
     pnpm build
-    node examples/release-readiness/run.ts
+    node dist/cli.js run --config examples/release-readiness/abilitybench.config.ts --inputs examples/release-readiness/inputs.json
 
 Pass the printed run ID to execute a candidate against that exact baseline:
 
-    node examples/release-readiness/run.ts run_<64-character-digest>
+    node dist/cli.js run --config examples/release-readiness/abilitybench.config.ts --inputs examples/release-readiness/inputs.json --baseline run_<64-character-digest>
+
+The smaller `run.ts` file demonstrates the equivalent programmatic SDK flow.
 
 With unchanged inputs, all stages reuse. The integration test changes only the security signal;
 security, summary, and report execute while the other stages reuse.

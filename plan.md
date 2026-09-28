@@ -1,5 +1,10 @@
 # AbilityBench — Plan
 
+> **Current status (2026-09-28):** The revised Phase 0 engine is implemented. Its normative
+> contract is in `execution-contract.md`, verification and assessment are under `docs/`, and
+> Phase 1 currently means the narrow local CLI specified in `docs/phase-1-cli.md`. Those documents
+> supersede older implementation details in this original product plan where they conflict.
+
 > **Working idea:** Change one part of your agent. Rerun only what the change could affect.
 
 AbilityBench is a local-first developer tool for testing expensive AI agents without blindly rerunning the entire workflow after every change.

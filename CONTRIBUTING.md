@@ -2,8 +2,10 @@
 
 ## Scope
 
-Keep changes within the active milestone in `execution-contract.md`. Phase 0 excludes provider
-integrations, databases, user interfaces, tool replay, cost tracking, and cloud features.
+Keep changes within the active milestone. The Phase 0 engine contract remains normative, and the
+active Phase 1 slice is the local CLI in `docs/phase-1-cli.md`. Provider integrations, databases,
+user interfaces, tool replay, cost tracking, implicit baselines, and cloud features remain out of
+scope.
 
 ## Workflow
 
@@ -45,4 +47,3 @@ pnpm typecheck
 pnpm test
 pnpm build
 ```
-

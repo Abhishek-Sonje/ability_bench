@@ -18,6 +18,7 @@ Phase 0 is under active development. Its execution contract and current SDK usag
 - [Phase 0 assessment and go/no-go result](./docs/phase-0-assessment.md)
 - [Platform support](./docs/platform-support.md)
 - [Release-readiness example](./examples/release-readiness/README.md)
+- [Phase 1 local CLI](./docs/phase-1-cli.md)
 
 AbilityBench is not ready for production use.
 
@@ -65,6 +66,19 @@ Cacheable stages must behave as pure functions of their declared dependencies, s
 environment variables, and watched files. AbilityBench cannot detect an undeclared influence.
 Typed input contracts are fingerprinted, and the grouped cache declaration makes each influence
 category visible at the stage boundary.
+
+## Local CLI
+
+After building, run a workflow with an explicit input file:
+
+```bash
+pnpm build
+node dist/cli.js run --config ./abilitybench.config.ts --inputs ./inputs.json
+```
+
+Pass `--baseline run_<digest>` to reuse from exactly that immutable run. Use `--invalidate
+<stage>` one or more times for manual invalidation, or `--json` for versioned machine output.
+The CLI never chooses a “latest” baseline implicitly.
 
 ## Development
 

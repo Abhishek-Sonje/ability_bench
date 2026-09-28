@@ -1,0 +1,8 @@
+{
+  "packages": ["core", "sdk", "docs"],
+  "signals": {
+    "criticalVulnerabilities": 0,
+    "docsCurrent": true,
+    "testsPassed": true
+  }
+}

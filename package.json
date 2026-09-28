@@ -4,6 +4,9 @@
   "private": true,
   "description": "Dependency-aware incremental execution for deterministic developer workflows.",
   "type": "module",
+  "bin": {
+    "abilitybench": "./dist/cli.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

@@ -33,6 +33,10 @@ not yet publish versioned releases.
 
 ### Added
 
+- Local `abilitybench run` command with explicit JSON inputs, explicit immutable baseline
+  selection, repeated manual invalidation, human explanations, and versioned JSON output.
+- Phase 1 CLI contract documenting exit statuses and the decision to defer SQLite until query
+  requirements justify it.
 - Phase 0 execution contract.
 - TypeScript project scaffold and contributor workflow.
 - Immutable workflow declaration with validation, cycle detection, and deterministic topological

@@ -3,6 +3,7 @@ export {
   type ArtifactStore,
   InMemoryArtifactStore,
 } from "./artifact-store.js";
+export { CLI_HELP, type CliIo, runCli } from "./cli-command.js";
 export {
   ConfigError,
   type ConfigErrorCode,
