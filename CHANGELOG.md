@@ -44,6 +44,9 @@ not yet publish versioned releases.
 
 ### Added
 
+- Design-only Phase 2 deterministic evaluation contract: independent boolean checks,
+  exact baseline lineage, immutable separate receipts, canonical identity, error semantics,
+  verification matrix, and explicit rejection of premature caching/scoring/provider features.
 - Synthetic process regression coverage for the Composio demo's five scenarios,
   duplicate-name records, loader failures, provenance, and read-only source behavior;
   an isolated review-output option and a concrete independent-review checklist.

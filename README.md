@@ -20,6 +20,7 @@ Phase 0 is under active development. Its execution contract and current SDK usag
 - [Release-readiness example](./examples/release-readiness/README.md)
 - [Phase 1 local CLI](./docs/phase-1-cli.md)
 - [Phase 1 readiness and external verification](./docs/phase-1-readiness.md)
+- [Phase 2 evaluation contract proposal (not implemented)](./docs/phase-2-evaluation-spec.md)
 
 AbilityBench is not ready for production use.
 
