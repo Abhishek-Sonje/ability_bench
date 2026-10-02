@@ -116,7 +116,7 @@ try {
       diff: diffRunManifests(baseline.manifest, result.manifest),
     });
     console.log(
-      `${scenario}: ${result.manifest.stages.map((stage) => `${stage.stageId}=${stage.finalDecision}(${stage.decisionReason})`).join(", ")}`,
+      `${scenario}: ${result.manifest.stages.map((stage) => `${stage.stageId}=${stage.executionStatus}[decision=${stage.finalDecision}; reason=${stage.decisionReason}]`).join(", ")}`,
     );
   };
   const candidate = async (options = {}) =>

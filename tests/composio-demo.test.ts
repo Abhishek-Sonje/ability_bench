@@ -89,6 +89,10 @@ describe("offline Composio demo process", () => {
     const result = invoke(source, output);
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("All scenario assertions passed.");
+    expect(result.stdout).toContain(
+      "delivery=skipped_dependency_failed[decision=execute; reason=cache_disabled]",
+    );
+    expect(result.stdout).toContain("report=failed[decision=execute; reason=fingerprint_changed]");
     const review = JSON.parse(await readFile(join(output, "demo-results.json"), "utf8")) as Review;
     expect(review.captured.map(({ filename }) => filename)).toEqual([
       "blocked.json",

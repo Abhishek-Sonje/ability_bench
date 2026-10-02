@@ -31,7 +31,8 @@ The [offline demo review](./demo-review.md) records the real captured-data exerc
 and gives a short feedback checklist. Synthetic process tests now cover that demo's
 branch-and-join scenarios without the external checkout. Neither replaces the
 independent workflow exercise below. Confirm CI for these new commits before treating
-their Windows/Ubuntu coverage as verified.
+their Windows/Ubuntu coverage as verified. Commit `9b447e9` has now passed both jobs;
+the walkthrough and presentation finding are recorded in the review document.
 
 ### 1. Independent workflow exercise
 

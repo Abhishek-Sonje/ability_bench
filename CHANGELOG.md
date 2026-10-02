@@ -9,6 +9,9 @@ not yet publish versioned releases.
 
 ### Changed
 
+- Show actual execution status separately from decisions in the Composio demo console,
+  so failed reports and skipped delivery cannot be mistaken for successful executions;
+  record maintainer walkthrough findings and verified Windows/Ubuntu CI for `9b447e9`.
 - Promote Windows x64 and GitHub-hosted Ubuntu/Linux x64 to verified local-filesystem targets after
   both CI quality jobs passed, while keeping macOS provisional and network filesystems unsupported.
 - Normalize `ENOENT` and `ENOTDIR` while classifying missing watched paths so regular-file
