@@ -15,6 +15,7 @@ import {
 
 const sourceRoot = resolve(process.argv[2] ?? "../composio-agent");
 const exampleRoot = fileURLToPath(new URL("./", import.meta.url));
+const outputRoot = resolve(process.argv[3] ?? join(exampleRoot, ".abilitybench"));
 const schemaPath = join(sourceRoot, "src", "agent", "result-schema.ts");
 const { appResearchResultSchema } = await import(pathToFileURL(schemaPath).href);
 const sourceFiles = (await readdir(join(sourceRoot, "results")))
@@ -167,7 +168,6 @@ try {
     await readFile(join(demoRoot, ".abilitybench", "runs", `${baseline.manifest.id}.json`), "utf8"),
   );
   assert.deepEqual(persisted, baseline.manifest);
-  const outputRoot = join(exampleRoot, ".abilitybench");
   await mkdir(outputRoot, { recursive: true });
   await writeFile(
     join(outputRoot, "demo-results.json"),

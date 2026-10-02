@@ -8,6 +8,8 @@ never changes that project. Its source dependencies must already be installed.
 pnpm example:composio-research
 # Or, after building, supply another checkout explicitly:
 node examples/composio-research/demo.mjs "C:\path\to\composio-agent"
+# Optionally isolate the generated review file in another directory:
+node examples/composio-research/demo.mjs "C:\path\to\composio-agent" "C:\path\to\review"
 ```
 
 The loader validates per-record JSON using that checkout's source Zod schema.
@@ -41,5 +43,9 @@ The initial local dataset contained 103 valid records, including two NotebookLM
 Enterprise snapshots. This is an execution demonstration, not a research-quality
 evaluation or proof that those findings remain current. Official-source counts
 count evidence entries, not deduplicated URLs. No upstream tool replay is implied.
-The script's assertions complement engine tests; this external dataset is not
-required by CI. Independent developer review is still needed to validate usability.
+The script's assertions complement engine tests. CI runs the actual script against
+synthetic records and a small schema adapter, without the external checkout or Zod.
+It verifies all five scenarios, record identities, schema rejection reporting,
+malformed/empty dataset failures, and unchanged input files. That adapter does not
+test the external project's schema itself. Independent developer review is still
+needed to validate usability; see [the review exercise](../../docs/demo-review.md).

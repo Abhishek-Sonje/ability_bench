@@ -27,6 +27,12 @@ by the implementation author.
 
 ## External verification required
 
+The [offline demo review](./demo-review.md) records the real captured-data exercise
+and gives a short feedback checklist. Synthetic process tests now cover that demo's
+branch-and-join scenarios without the external checkout. Neither replaces the
+independent workflow exercise below. Confirm CI for these new commits before treating
+their Windows/Ubuntu coverage as verified.
+
 ### 1. Independent workflow exercise
 
 Have a developer who did not implement the engine model one small real workflow containing:

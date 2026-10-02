@@ -41,6 +41,9 @@ not yet publish versioned releases.
 
 ### Added
 
+- Synthetic process regression coverage for the Composio demo's five scenarios,
+  duplicate-name records, loader failures, provenance, and read-only source behavior;
+  an isolated review-output option and a concrete independent-review checklist.
 - Offline Composio research demo with typed captured inputs, branch-and-join screening,
   immutable-baseline scenarios, dry-run delivery, provenance, and reviewable reports.
 - Compiled CLI process tests for all five commands using an isolated branch-and-join project,
