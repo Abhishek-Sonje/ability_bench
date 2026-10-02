@@ -11,6 +11,22 @@ export {
   loadWorkflowConfig,
 } from "./config.js";
 export {
+  type BuiltEvaluationSuite,
+  type CheckComparison,
+  type CheckContext,
+  type CheckDeclaration,
+  type CheckHandle,
+  type CheckResult,
+  type CheckVerdict,
+  compareCheckVerdicts,
+  createEvaluationSuite,
+  defineCheck,
+  type EvaluationCheckDefinition,
+  EvaluationValidationError,
+  summarizeCheckVerdicts,
+  validateCheckResult,
+} from "./evaluation.js";
+export {
   type ExecutedStageRecord,
   type ExecuteWorkflowRequest,
   executeWorkflow,

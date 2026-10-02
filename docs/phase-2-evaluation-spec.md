@@ -1,7 +1,9 @@
 # Phase 2: Deterministic evaluation contract
 
-Status: design proposal only. No evaluation API, loader, CLI command, or storage
-format in this document is implemented. The Phase 0 execution contract and Phase 1
+Status: implementation contract in progress. Only suite declarations and pure result/
+comparison validation are implemented; see [progress](./phase-2-progress.md).
+The runner, loader, CLI commands, fingerprints, and receipt storage remain unimplemented.
+The Phase 0 execution contract and Phase 1
 CLI remain authoritative for existing behavior. Drafting this design does not close
 the independent-workflow usability gate or authorize a public release.
 
@@ -70,7 +72,8 @@ changed criterion therefore cannot be compared against an old verdict by acciden
 
 ## 4. Proposed public SDK
 
-The following shape is illustrative, not available exports:
+Declaration exports are available. `evaluateRunPair` and the receipt API below remain
+illustrative and are not available exports:
 
 ```ts
 const reportNonempty = defineCheck({
@@ -418,4 +421,5 @@ If the contract is accepted, implement in small verified commits:
 4. Immutable receipt storage and integrity verification.
 5. Synthetic intentional-regression walkthrough; assess SDK ergonomics before any CLI.
 
-No implementation is part of this specification commit.
+The original specification commit contained no implementation. Subsequent slices
+are tracked separately in the progress document.

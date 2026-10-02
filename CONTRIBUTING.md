@@ -5,7 +5,9 @@
 Keep changes within the active milestone. The Phase 0 engine contract remains normative, and the
 active Phase 1 slice is the local CLI in `docs/phase-1-cli.md`. Provider integrations, databases,
 user interfaces, tool replay, cost tracking, implicit baselines, and cloud features remain out of
-scope.
+scope for the execution milestone. The authorized Phase 2 slice adds only evaluation
+declarations and pure comparisons as tracked in `docs/phase-2-progress.md`; it does
+not yet implement an evaluator runner or receipt persistence.
 
 ## Workflow
 

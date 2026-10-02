@@ -79,7 +79,9 @@ Evaluations, LLM providers, UI, tool replay, cost tracking, remote caches, cloud
 baseline selection, and destructive cleanup remain outside this milestone. The evaluation model
 must be specified before implementation so evaluation status does not leak into execution status.
 The [Phase 2 evaluation proposal](./phase-2-evaluation-spec.md) now specifies that
-future boundary; it is design-only and does not change the active implementation scope.
+future boundary. Its authorized declaration/comparison implementation is tracked separately in
+[Phase 2 progress](./phase-2-progress.md), without changing the Phase 1 CLI contract
+or closing the external validation gate.
 
 ## Phase 1 exit rule
 

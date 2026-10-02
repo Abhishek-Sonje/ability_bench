@@ -44,6 +44,9 @@ not yet publish versioned releases.
 
 ### Added
 
+- Evaluation suite/check declarations using built-in typed artifact selectors, strict
+  boolean result validation, pure verdict comparisons, and error-aware summaries;
+  no evaluator execution, fingerprints, or receipt storage yet.
 - Design-only Phase 2 deterministic evaluation contract: independent boolean checks,
   exact baseline lineage, immutable separate receipts, canonical identity, error semantics,
   verification matrix, and explicit rejection of premature caching/scoring/provider features.

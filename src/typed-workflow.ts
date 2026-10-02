@@ -121,6 +121,11 @@ const declarations = new WeakMap<object, StageDeclaration>();
 const inputParsers = new WeakMap<object, InputParser>();
 const influenceDeclarations = new WeakSet<object>();
 
+/** Internal descriptor provenance check shared by declaration APIs. */
+export function isBuiltInInputDescriptor(value: unknown): value is AnyInputDescriptor {
+  return typeof value === "object" && value !== null && inputParsers.has(value);
+}
+
 function required<Value>(value: Value | undefined, pointer: string, expected: string): Value {
   if (value === undefined) {
     throw new InputValidationError("input_missing", pointer, expected);
