@@ -148,6 +148,11 @@ not as a secret report.
 
 ## Verification
 
+The quality gate builds the CLI before running process integration tests. Those tests launch
+`dist/cli.js` with Node in an isolated project whose path contains spaces, exercise all five
+commands on a branch-and-join graph, and verify actual exit codes and stdout/stderr separation.
+They also compare manifest bytes and directory contents before and after planning.
+
 The command tests cover:
 
 - first execution with no baseline

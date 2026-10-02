@@ -41,6 +41,8 @@ not yet publish versioned releases.
 
 ### Added
 
+- Compiled CLI process tests for all five commands using an isolated branch-and-join project,
+  paths containing spaces, read-only planning, and actual exit codes and output streams.
 - Read-only GitHub Actions CI across current Ubuntu and Windows runners with Node 24, the
   project-pinned pnpm version, dependency caching, and frozen-lockfile enforcement.
 - Local `abilitybench run` command with explicit JSON inputs, explicit immutable baseline
