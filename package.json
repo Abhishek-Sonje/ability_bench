@@ -18,6 +18,7 @@
     "node": ">=24.20.0 <25"
   },
   "scripts": {
+    "example:composio-research": "pnpm build && node examples/composio-research/demo.mjs",
     "build": "tsc -p tsconfig.build.json",
     "check": "biome check . && tsc -p tsconfig.build.json && tsc -p tsconfig.json --noEmit && vitest run",
     "example:release-readiness": "pnpm build && node examples/release-readiness/run.ts",

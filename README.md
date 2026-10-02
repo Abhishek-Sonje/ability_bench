@@ -119,6 +119,9 @@ versioned `phase1-cli-error-v1` document on stderr instead of human-formatted te
 
 ## Development
 
+For an offline branch-and-join demo using saved research from a sibling Composio
+project, see [the Composio research example](./examples/composio-research/README.md).
+
 Requirements:
 
 - Node.js 24.20.0 or newer within the Node 24 release line

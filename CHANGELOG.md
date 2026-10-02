@@ -41,6 +41,8 @@ not yet publish versioned releases.
 
 ### Added
 
+- Offline Composio research demo with typed captured inputs, branch-and-join screening,
+  immutable-baseline scenarios, dry-run delivery, provenance, and reviewable reports.
 - Compiled CLI process tests for all five commands using an isolated branch-and-join project,
   paths containing spaces, read-only planning, and actual exit codes and output streams.
 - Read-only GitHub Actions CI across current Ubuntu and Windows runners with Node 24, the
