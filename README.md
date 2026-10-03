@@ -28,6 +28,7 @@ Public-release decisions remain open and deferred. See the
 - [Release-readiness example](./examples/release-readiness/README.md)
 - [Phase 1 local CLI](./docs/phase-1-cli.md)
 - [Evaluation CLI and exit-status contract](./docs/phase-2-cli.md)
+- [Read-only workflow viewer engineering boundary](./docs/phase-3-read-only-viewer.md)
 - [Phase 1 readiness and external verification](./docs/phase-1-readiness.md)
 - [Phase 2 evaluation contract](./docs/phase-2-evaluation-spec.md)
 - [Phase 2 evaluation progress](./docs/phase-2-progress.md)

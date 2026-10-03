@@ -21,6 +21,8 @@ not yet publish versioned releases.
 
 ### Changed
 
+- Begin the authorized read-only viewer milestone with a historical-data and local-read
+  boundary; no frontend or new runtime feature is implemented by this specification.
 - Close the agreed independent-workflow usability gate after a user-modeled real
   Composio exercise, explicit interpretation of decisions, and verified display-order
   metadata in the isolated adapter. Preserve the canonical codec and all engine code.
