@@ -36,9 +36,16 @@ The audit pass is user-reported, not a newly claimed independent review.
 
 ## Remaining validation/release gates
 
-1. Collect independent developer feedback on workflow modeling and decision explanations.
-2. Before a public release, decide package ownership/name, license, initial version,
+The [independent workflow usability exercise](./independent-workflow-validation.md)
+is complete: the user supplied and explained a real Composio workflow, and the
+identified report-order compatibility issue was resolved in its isolated adapter.
+No engine implementation changed. This closes the agreed modeling/understanding gate,
+not a blind third-party study.
+
+Before a public release, decide package ownership/name, license, initial version,
    compatibility policy, and support commitments; verify package contents and installation.
+Release work is currently deferred. The next authorized scope is the read-only local
+workflow viewer, with a separate boundary before implementation.
 
 These are verification and product-ownership gates, not missing engine/CLI features.
 macOS remains provisional; network filesystems remain unsupported. The package remains

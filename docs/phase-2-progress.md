@@ -124,6 +124,8 @@ explicit pairs and exact receipt inspection, optional lazy suite loading, explic
 and separate assertion/command/evaluator exit statuses. Built-process tests exercise
 branch-and-join pairs, historical lookup without callbacks, immutable execution history,
 repeated fresh invocation, containment, corruption, instability, and publication failure.
-Do not add a scoring framework, evaluator cache, provider adapter, database,
-or UI. Independent usability and public-release ownership
-gates remain open; implementation tests do not close them.
+The [independent workflow exercise](./independent-workflow-validation.md) subsequently
+closed the agreed usability gate through user modeling, explanation, and adapter-ordering
+verification, not through implementation tests alone. The next separately authorized
+milestone is a read-only local workflow viewer. Scoring, evaluator caching, providers,
+databases, cloud, replay, workflow editing, and release work remain outside that scope.

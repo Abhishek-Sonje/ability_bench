@@ -21,6 +21,9 @@ not yet publish versioned releases.
 
 ### Changed
 
+- Close the agreed independent-workflow usability gate after a user-modeled real
+  Composio exercise, explicit interpretation of decisions, and verified display-order
+  metadata in the isolated adapter. Preserve the canonical codec and all engine code.
 - Confirm Windows/Ubuntu CI for completion commit `6675717`, including the evaluation
   CLI; close the cross-platform technical gate while retaining independent usability
   and public-release ownership gates.

@@ -2,13 +2,13 @@
 
 ## Decision
 
-The local execution product is ready for external validation, but it is not yet ready for a public
-release.
+The agreed independent workflow-modeling and explanation gate is now closed.
+Public-release ownership decisions remain open and release work is deferred.
 
 The deterministic engine and local CLI now cover declaration, planning, execution, immutable run
 inspection, exact run comparison, and bounded run discovery. GitHub-hosted Ubuntu and Windows
-verification is green. The remaining product gate requires feedback from a workflow not designed
-by the implementation author.
+verification is green. The user-modeled real Composio workflow and adapter-ordering
+verification are recorded in [the validation report](./independent-workflow-validation.md).
 
 ## Completed gates
 
@@ -23,9 +23,13 @@ by the implementation author.
 | Machine interface | Pass locally | Versioned success and error documents with stable exit statuses |
 | Windows quality gate | Pass | Local checks, built-binary smoke tests, and GitHub-hosted CI |
 | Linux quality gate | Pass | GitHub-hosted Ubuntu CI, including the POSIX permission regression |
-| Independent workflow ergonomics | Pending external verification | Current examples and fixtures were authored with the engine |
+| Independent workflow ergonomics | Pass for the agreed exercise | User-authored real-project model, explicit explanations, and verified ordering contract |
 
 ## External verification required
+
+The workflow exercise below is the original acceptance criterion. It has now passed
+as recorded above; it is not a claim of a blind third-party study. Platform/release
+decisions outside that exercise remain separate.
 
 The [offline demo review](./demo-review.md) records the real captured-data exercise
 and gives a short feedback checklist. Synthetic process tests now cover that demo's

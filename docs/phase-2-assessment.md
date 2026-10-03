@@ -3,7 +3,10 @@
 ## Decision
 
 Technical prototype: complete and stabilized for developer-local use.
-Public-release and independent-usability gate: still open.
+Public-release gate: open and deferred. The subsequently completed
+[independent usability exercise](./independent-workflow-validation.md) closes the
+agreed workflow-modeling and explanation gate. The earlier assessment below remains
+historical evidence, not its closure proof.
 
 The user reported the audit as passed. This stabilization pass verified CI rather than
 performing or claiming another code audit. No independent-workflow exercise details

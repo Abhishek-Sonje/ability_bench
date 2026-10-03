@@ -13,7 +13,9 @@ The developer-local technical scope is complete, including the evaluation CLI.
 Implementation commit `0692ca3` passed the local Windows quality gate (187 active tests,
 one POSIX-only skip). Windows/Ubuntu CI is verified through `6675717`, including
 the evaluation CLI. The audit was reported as passed by the user.
-Independent usability and public-release decisions remain open. See the
+The [independent workflow usability gate](./docs/independent-workflow-validation.md)
+is closed after the user-modeled Composio exercise and explicit ordering verification.
+Public-release decisions remain open and deferred. See the
 [completion report](./docs/project-completion.md). Contracts and usage:
 
 - [Product plan](./plan.md)
