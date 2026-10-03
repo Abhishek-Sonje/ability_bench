@@ -185,7 +185,11 @@ export class FileRunManifestStore {
   }
 }
 
-async function writeImmutable(path: string, bytes: Uint8Array, identity: string): Promise<void> {
+export async function writeImmutable(
+  path: string,
+  bytes: Uint8Array,
+  identity: string,
+): Promise<void> {
   const temporaryPath = join(dirname(path), `.tmp-${randomUUID()}`);
   try {
     await mkdir(dirname(path), { recursive: true });

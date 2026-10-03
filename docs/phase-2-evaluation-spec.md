@@ -2,8 +2,8 @@
 
 Status: implementation contract in progress. Suite declarations, pure result/comparison
 validation, read-only pair preparation, and sequential in-memory evaluation with
-invocation fingerprints are implemented; see [progress](./phase-2-progress.md).
-The loader, CLI commands, and receipt storage remain unimplemented.
+invocation fingerprints, immutable receipts, and exact verified lookup are implemented;
+see [progress](./phase-2-progress.md). The loader and CLI commands remain unimplemented.
 The Phase 0 execution contract and Phase 1
 CLI remain authoritative for existing behavior. Drafting this design does not close
 the independent-workflow usability gate or authorize a public release.
@@ -289,12 +289,14 @@ not objective quality or statistical significance.
 
 1. Seal/validate the full suite and canonical criteria before callbacks.
 2. Verify exact pair lineage and all required source artifacts.
-3. Snapshot implementation identity and write/deduplicate the criteria artifact.
+3. Snapshot implementation identity and criteria artifact identity without publication.
 4. In sorted check-ID order, select and isolate the baseline output, fingerprint,
    validate, invoke, and validate its result; repeat for candidate. Record ordinary
    side errors and continue. Missing typed selections are errors, not omitted checks.
 5. Classify each pair and compute summaries with the fixed rules above.
-6. Recheck all watched inputs. Finalize and atomically publish one immutable receipt.
+6. Publish/deduplicate criteria, verify receipt references, recheck watched inputs,
+   and atomically publish one immutable receipt. Deferring criteria publication until
+   safe evaluation completes reduces unnecessary objects.
 
 There is deliberately no reuse/invalidation planner for evaluators. Changes to a
 revision, watched file, selector contract, or criteria alter identity and require

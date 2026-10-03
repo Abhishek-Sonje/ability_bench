@@ -72,8 +72,16 @@ export async function executeEvaluationPair(
   suite: BuiltEvaluationSuite,
   options: PrepareEvaluationPairOptions,
 ): Promise<EvaluationExecutionResult> {
-  const createdAt = new Date().toISOString();
   const prepared = await prepareEvaluationPair(suite, options);
+  return executePreparedEvaluationPair(suite, prepared);
+}
+
+/** Internal runner shared by no-write execution and receipt publication. */
+export async function executePreparedEvaluationPair(
+  suite: BuiltEvaluationSuite,
+  prepared: PreparedEvaluationPair,
+): Promise<EvaluationExecutionResult> {
+  const createdAt = new Date().toISOString();
   const checks: EvaluatedCheckPair[] = [];
   for (const [index, check] of suite.checks.entries()) {
     const pair = prepared.checks[index];
@@ -181,8 +189,8 @@ export async function executeEvaluationPair(
   }
 }
 
-function checkFingerprint(
-  prepared: PreparedEvaluationPair,
+export function checkFingerprint(
+  prepared: Pick<PreparedEvaluationPair, "suiteHash" | "criteriaArtifactHash">,
   side: PreparedCheckSide,
   checkId: string,
   targetStageId: string,

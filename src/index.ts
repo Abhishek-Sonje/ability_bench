@@ -42,6 +42,12 @@ export {
   prepareEvaluationPair,
 } from "./evaluation-pair.js";
 export {
+  type EvaluationReceipt,
+  EvaluationReceiptError,
+  evaluateRunPair,
+  FileEvaluationReceiptStore,
+} from "./evaluation-receipt.js";
+export {
   type ExecutedStageRecord,
   type ExecuteWorkflowRequest,
   executeWorkflow,

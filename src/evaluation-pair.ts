@@ -172,8 +172,8 @@ export async function prepareEvaluationPair(
     Object.freeze({
       checkId: check.id,
       targetStageId: check.targetStage,
-      baseline: select(check, baselineHash, decoded.get(baselineHash)),
-      candidate: select(check, candidateHash, decoded.get(candidateHash)),
+      baseline: selectEvaluationOutput(check, baselineHash, decoded.get(baselineHash)),
+      candidate: selectEvaluationOutput(check, candidateHash, decoded.get(candidateHash)),
     }),
   );
   return Object.freeze({
@@ -257,7 +257,7 @@ function targetArtifact(run: FinalizedRunManifest, stageId: string): string {
   return stage.outputArtifactHash;
 }
 
-function select(
+export function selectEvaluationOutput(
   check: EvaluationCheckDefinition,
   hash: string,
   artifact: JsonValue | undefined,

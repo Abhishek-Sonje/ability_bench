@@ -2,7 +2,7 @@
 
 The [evaluation contract](./phase-2-evaluation-spec.md) guides this work. Only the
 declaration, pure comparison, read-only pair preparation, and the sequential evaluator
-runner are implemented. Receipt publication and lookup are not implemented.
+runner, immutable receipt publication, and exact verified lookup are implemented.
 Existing execution manifests, CLI commands, and baseline eligibility are unchanged.
 
 ## Available SDK surface
@@ -18,6 +18,9 @@ Existing execution manifests, CLI commands, and baseline eligibility are unchang
   criteria, implementation identity, and isolated typed artifact selections.
 - `executeEvaluationPair()` prepares fresh inputs, evaluates both sides sequentially,
   and returns a deeply frozen in-memory result without writing anything.
+- `evaluateRunPair()` evaluates fresh inputs and publishes a separate immutable receipt.
+- `FileEvaluationReceiptStore` provides exact verified lookup and immutable publication.
+  See [storage details](./phase-2-storage.md).
 
 Declaration validation reuses the execution engine's identifier, selector, revision,
 and root-relative watched-file rules. Built-in descriptor provenance is checked;
@@ -66,8 +69,8 @@ this contract's detection capabilities.
 
 The returned `EvaluationExecutionResult` is not an immutable stored receipt: it has
 no receipt ID and no exact lookup API. Its criteria artifact hash is an identity only;
-the criteria artifact is not published by this runner. Runtime metadata and atomic
-receipt publication belong to the next slice. Existing run inspection still reports
+the criteria artifact is not published by this runner. The persisted variant adds
+runtime metadata and atomic publication separately. Existing run inspection still reports
 its original `evaluationStatus: "not_run"`; evaluation does not rewrite execution.
 
 ```ts
@@ -98,11 +101,12 @@ symlink/junction boundaries. Evaluators are never invoked by these preparation t
 ordinary-error continuation, strict results, frozen input isolation, no result reuse,
 canonical fingerprints, watched-input instability, hostile error diagnostics, and
 byte-identical storage before/after successful evaluations.
+`tests/evaluation-receipt.test.ts` covers publication, historical lookup, tamper detection,
+references, error receipts, repeated execution, collisions, containment, and cleanup.
 
 ## Remaining slices
 
-1. Immutable receipt publication and exact integrity-checked lookup.
-2. Synthetic intentional-regression walkthrough and usability assessment.
+1. Synthetic intentional-regression walkthrough and usability assessment.
 
 Do not add a CLI, scoring framework, evaluator cache, provider adapter, database,
 or UI as part of these slices. Independent usability and public-release ownership

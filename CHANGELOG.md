@@ -44,6 +44,9 @@ not yet publish versioned releases.
 
 ### Added
 
+- Immutable evaluation receipt publication and exact verified lookup, with archived
+  suite identity, runtime metadata, source/criteria artifact verification, recomputed
+  fingerprints and summaries, and no changes to execution manifests.
 - Sequential in-memory evaluation runner with canonical per-side fingerprints, explicit
   error continuation, full-suite implementation stability checks, immutable contexts,
   and no evaluation caching or storage writes.

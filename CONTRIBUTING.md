@@ -7,7 +7,8 @@ active Phase 1 slice is the local CLI in `docs/phase-1-cli.md`. Provider integra
 user interfaces, tool replay, cost tracking, implicit baselines, and cloud features remain out of
 scope for the execution milestone. The authorized Phase 2 slice adds only evaluation
 declarations, pure comparisons, read-only pair preparation, and sequential in-memory
-evaluation as tracked in `docs/phase-2-progress.md`. Receipt persistence remains deferred.
+evaluation with immutable receipt publication and verified lookup as tracked in
+`docs/phase-2-progress.md`. Evaluation CLI commands remain deferred.
 
 ## Workflow
 
