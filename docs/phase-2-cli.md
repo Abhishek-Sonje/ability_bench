@@ -1,6 +1,6 @@
 # Evaluation CLI contract
 
-Status: specified, not implemented. This is a bounded extension of the existing
+Status: implemented, with built-process regression coverage. This is a bounded extension of the existing
 [local CLI](./phase-1-cli.md), not a new execution or evaluation engine.
 
 ## Scope

@@ -1,6 +1,7 @@
 import { stat } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { type BuiltEvaluationSuite, isBuiltEvaluationSuite } from "./evaluation.js";
 
 import { PathEscapeError, resolveContainedPath } from "./path-safety.js";
 import type { BuiltWorkflow } from "./types.js";
@@ -11,6 +12,7 @@ export interface LoadedWorkflowConfig {
   readonly workflowPath: string;
   readonly storageDir: string;
   readonly workflow: BuiltWorkflow;
+  readonly evaluationSetting?: string;
 }
 
 export type ConfigErrorCode =
@@ -18,7 +20,10 @@ export type ConfigErrorCode =
   | "invalid_config"
   | "invalid_workflow_export"
   | "path_escaped"
-  | "workflow_not_found";
+  | "workflow_not_found"
+  | "evaluation_not_configured"
+  | "evaluation_not_found"
+  | "invalid_evaluation_export";
 
 export class ConfigError extends Error {
   constructor(
@@ -40,12 +45,18 @@ export async function loadWorkflowConfig(
   const configDirectory = dirname(absoluteConfigPath);
   const imported: unknown = await import(pathToFileURL(absoluteConfigPath).href);
   const config = readDefaultExport(imported);
-  const { workflow: workflowSetting, storageDir: storageSetting } = config ?? {};
+  const {
+    workflow: workflowSetting,
+    storageDir: storageSetting,
+    evaluation: evaluationSetting,
+  } = config ?? {};
   if (
     config === null ||
     typeof workflowSetting !== "string" ||
     workflowSetting.length === 0 ||
-    (storageSetting !== undefined && typeof storageSetting !== "string")
+    (storageSetting !== undefined && typeof storageSetting !== "string") ||
+    (evaluationSetting !== undefined &&
+      (typeof evaluationSetting !== "string" || evaluationSetting.trim() === ""))
   ) {
     throw new ConfigError(
       "invalid_config",
@@ -79,7 +90,47 @@ export async function loadWorkflowConfig(
       `Workflow root "${workflow.root}" must match the config directory "${configDirectory}".`,
     );
   }
-  return Object.freeze({ configPath: absoluteConfigPath, workflowPath, storageDir, workflow });
+  return Object.freeze({
+    configPath: absoluteConfigPath,
+    workflowPath,
+    storageDir,
+    workflow,
+    ...(evaluationSetting === undefined ? {} : { evaluationSetting: evaluationSetting as string }),
+  });
+}
+
+/** Lazy loading: historical inspection never imports evaluator code. */
+export async function loadEvaluationSuite(
+  loaded: LoadedWorkflowConfig,
+): Promise<BuiltEvaluationSuite> {
+  if (loaded.evaluationSetting === undefined) {
+    throw new ConfigError(
+      "evaluation_not_configured",
+      "Config requires an evaluation module for evaluate.",
+    );
+  }
+  const root = dirname(loaded.configPath);
+  let path: string;
+  try {
+    path = await resolveContainedPath(root, loaded.evaluationSetting);
+  } catch (error: unknown) {
+    if (error instanceof PathEscapeError) throw new ConfigError("path_escaped", error.message);
+    throw error;
+  }
+  if (!(await existsFile(path)))
+    throw new ConfigError("evaluation_not_found", `Evaluation module "${path}" was not found.`);
+  const suite = readDefaultExport(await import(pathToFileURL(path).href));
+  if (
+    !isBuiltEvaluationSuite(suite) ||
+    suite.workflowId !== loaded.workflow.id ||
+    resolve(suite.root) !== root
+  ) {
+    throw new ConfigError(
+      "invalid_evaluation_export",
+      "Evaluation module must default-export a sealed suite for the configured workflow and root.",
+    );
+  }
+  return suite;
 }
 
 function readDefaultExport(module: unknown): Record<string, unknown> | null {

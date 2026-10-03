@@ -8,7 +8,8 @@ user interfaces, tool replay, cost tracking, implicit baselines, and cloud featu
 scope for the execution milestone. The authorized Phase 2 slice adds only evaluation
 declarations, pure comparisons, read-only pair preparation, and sequential in-memory
 evaluation with immutable receipt publication and verified lookup as tracked in
-`docs/phase-2-progress.md`. Evaluation CLI commands remain deferred.
+`docs/phase-2-progress.md`. The bounded evaluation CLI adds only fresh evaluation and
+exact receipt inspection under `docs/phase-2-cli.md`; no broader feature scope is authorized.
 
 ## Workflow
 

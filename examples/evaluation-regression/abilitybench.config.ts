@@ -1,1 +1,5 @@
-export default { workflow: "./workflow.ts", storageDir: ".abilitybench" };
+export default {
+  workflow: "./workflow.ts",
+  storageDir: ".abilitybench",
+  evaluation: "./evaluation.ts",
+};

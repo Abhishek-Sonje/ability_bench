@@ -28,7 +28,7 @@ import {
   PersistenceError,
   writeImmutable,
 } from "./filesystem-store.js";
-import { resolveContainedPath } from "./path-safety.js";
+import { PathEscapeError, resolveContainedPath } from "./path-safety.js";
 import { canonicalizeJson, createArtifact, decodeArtifact } from "./serialization.js";
 import { type AnyInputDescriptor, input } from "./typed-workflow.js";
 
@@ -99,11 +99,12 @@ export class FileEvaluationReceiptStore {
   }
 
   async get(id: string): Promise<EvaluationReceipt | undefined> {
-    const path = await this.#path(id);
     let bytes: Uint8Array;
     try {
+      const path = await this.#path(id);
       bytes = await readFile(path);
     } catch (error: unknown) {
+      if (error instanceof EvaluationReceiptError || error instanceof PathEscapeError) throw error;
       if (error instanceof Error && "code" in error && error.code === "ENOENT") return undefined;
       throw new PersistenceError("read_failed", `Unable to read evaluation "${id}".`, error);
     }

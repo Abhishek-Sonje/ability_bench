@@ -2,13 +2,19 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-import { loadWorkflowConfig } from "./config.js";
+import { loadEvaluationSuite, loadWorkflowConfig } from "./config.js";
+import {
+  type EvaluationReceipt,
+  evaluateRunPair,
+  FileEvaluationReceiptStore,
+} from "./evaluation-receipt.js";
 import type { WorkflowExecutionResult } from "./execution.js";
 import { FileRunManifestStore } from "./filesystem-store.js";
 import type { WorkflowPlan } from "./planning.js";
 import { diffRunManifests, type RunDiff } from "./run-diff.js";
 import type { FinalizedRunManifest } from "./run-manifest.js";
 import { planWorkflowRun, runWorkflow } from "./runner.js";
+import { canonicalizeJson } from "./serialization.js";
 import type { JsonObject } from "./types.js";
 
 const HELP = `AbilityBench
@@ -19,10 +25,13 @@ Usage:
   abilitybench inspect <run-id> [options]
   abilitybench diff <run-a> <run-b> [options]
   abilitybench runs [options]
+  abilitybench evaluate <baseline-run-id> <candidate-run-id> --criteria <file> [options]
+  abilitybench evaluation <evaluation-id> [options]
 
 Options:
   --config <file>       Config file (default: ./abilitybench.config.ts)
   --inputs <file>       Required strict-JSON input object
+  --criteria <file>     Required strict-JSON evaluation criteria object
   --baseline <run-id>   Explicit immutable baseline; omit for a full run
   --invalidate <stage>  Force one stage to execute; repeat for multiple stages
   --limit <count>       Maximum runs to list (default: 20, maximum: 1000)
@@ -55,7 +64,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     }
     const [command, ...commandArgs] = argv;
     if (!isCliCommand(command)) {
-      throw new CliUsageError('Expected the command "run", "plan", "inspect", "diff", or "runs".');
+      throw new CliUsageError("Expected run, plan, inspect, diff, runs, evaluate, or evaluation.");
     }
     const parsed = parseCliArgs(command, commandArgs);
     if (command === "run") return await runCommand(parsed, io);
@@ -63,6 +72,8 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
     if (command === "inspect") return await inspectCommand(parsed, io);
     if (command === "diff") return await diffCommand(parsed, io);
     if (command === "runs") return await runsCommand(parsed, io);
+    if (command === "evaluate") return await evaluateCommand(parsed, io);
+    if (command === "evaluation") return await evaluationCommand(parsed, io);
     throw new CliUsageError(`Unsupported command: ${command satisfies never}`);
   } catch (error: unknown) {
     if (wantsJson) {
@@ -76,7 +87,7 @@ export async function runCli(argv: readonly string[], io: CliIo): Promise<number
   }
 }
 
-type CliCommand = "run" | "plan" | "inspect" | "diff" | "runs";
+type CliCommand = "run" | "plan" | "inspect" | "diff" | "runs" | "evaluate" | "evaluation";
 
 interface CliValues {
   readonly baseline?: string;
@@ -85,6 +96,7 @@ interface CliValues {
   readonly invalidate?: readonly string[];
   readonly json?: boolean;
   readonly limit?: string;
+  readonly criteria?: string;
 }
 
 interface ParsedCli {
@@ -98,7 +110,9 @@ function isCliCommand(value: string | undefined): value is CliCommand {
     value === "plan" ||
     value === "inspect" ||
     value === "diff" ||
-    value === "runs"
+    value === "runs" ||
+    value === "evaluate" ||
+    value === "evaluation"
   );
 }
 
@@ -118,7 +132,9 @@ function parseCliArgs(command: CliCommand, args: readonly string[]): ParsedCli {
       ? execution
       : command === "runs"
         ? { ...common, limit: { type: "string" as const } }
-        : common;
+        : command === "evaluate"
+          ? { ...common, criteria: { type: "string" as const } }
+          : common;
   const parsed = parseArgs({
     args: [...args],
     allowPositionals: true,
@@ -276,6 +292,100 @@ function parseRunLimit(value: string | undefined): number {
   return limit;
 }
 
+async function evaluateCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
+  if (parsed.positionals.length !== 2 || parsed.values.criteria === undefined) {
+    throw new CliUsageError('The "evaluate" command requires two run IDs and --criteria <file>.');
+  }
+  const criteria = await readCriteria(resolve(io.cwd, parsed.values.criteria));
+  const loaded = await loadWorkflowConfig(
+    resolve(io.cwd, parsed.values.config ?? "abilitybench.config.ts"),
+  );
+  const suite = await loadEvaluationSuite(loaded);
+  const receipt = await evaluateRunPair(suite, {
+    baselineRunId: parsed.positionals[0] as string,
+    candidateRunId: parsed.positionals[1] as string,
+    criteria,
+    storageDir: loaded.storageDir,
+  });
+  printEvaluation(receipt, "phase2-cli-evaluate-v1", parsed, io);
+  if (receipt.evaluationStatus === "error" || receipt.comparisonStatus === "error") return 3;
+  if (receipt.evaluationStatus === "failed" || receipt.comparisonStatus === "regressed") return 1;
+  return 0;
+}
+
+async function evaluationCommand(parsed: ParsedCli, io: CliIo): Promise<number> {
+  if (parsed.positionals.length !== 1)
+    throw new CliUsageError('The "evaluation" command requires one evaluation ID.');
+  const loaded = await loadWorkflowConfig(
+    resolve(io.cwd, parsed.values.config ?? "abilitybench.config.ts"),
+  );
+  const receipt = await new FileEvaluationReceiptStore(loaded.storageDir).get(
+    parsed.positionals[0] as string,
+  );
+  if (receipt === undefined)
+    throw new CliLookupError("evaluation_not_found", "Evaluation receipt was not found.");
+  if (receipt.workflowId !== loaded.workflow.id)
+    throw new CliLookupError(
+      "run_workflow_mismatch",
+      "Evaluation belongs to a different workflow.",
+    );
+  printEvaluation(receipt, "phase2-cli-evaluation-v1", parsed, io);
+  return 0;
+}
+
+function printEvaluation(
+  receipt: EvaluationReceipt,
+  schemaVersion: string,
+  parsed: ParsedCli,
+  io: CliIo,
+): void {
+  if (parsed.values.json === true) {
+    io.stdout(`${JSON.stringify({ schemaVersion, receipt }, null, 2)}\n`);
+    return;
+  }
+  const lines = [
+    `Evaluation receipt: ${receipt.id}`,
+    `Workflow: ${receipt.workflowId}; suite: ${receipt.suiteId}`,
+    `Baseline: ${receipt.baseline.runId} [completed]`,
+    `Candidate: ${receipt.candidate.runId} [completed]`,
+    `Evaluation: ${receipt.evaluationStatus}; comparison: ${receipt.comparisonStatus}`,
+    `Summary: ${JSON.stringify(receipt.summary)}`,
+  ];
+  for (const check of receipt.checks) {
+    lines.push(
+      `${check.checkId}: baseline=${check.baseline.verdict}; candidate=${check.candidate.verdict}; comparison=${check.comparison}`,
+    );
+    for (const side of ["baseline", "candidate"] as const) {
+      const error = check[side].error;
+      if (error !== null) lines.push(`  ${side}: ${error.code}: ${error.message}`);
+    }
+  }
+  io.stdout(`${lines.join("\n")}\n`);
+}
+
+async function readCriteria(path: string): Promise<JsonObject> {
+  let text: string;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(await readFile(path));
+  } catch {
+    throw new CliInputError("criteria_read_failed", `Unable to read criteria file "${path}".`);
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new CliInputError("criteria_invalid_json", "Criteria file is not valid JSON.");
+  }
+  if (value === null || Array.isArray(value) || typeof value !== "object") {
+    throw new CliInputError("criteria_not_object", "Criteria must contain a JSON object.");
+  }
+  try {
+    return JSON.parse(canonicalizeJson(value)) as JsonObject;
+  } catch {
+    throw new CliInputError("invalid_criteria", "Criteria must contain canonical JSON values.");
+  }
+}
+
 async function loadProjectManifest(
   store: FileRunManifestStore,
   runId: string,
@@ -306,7 +416,14 @@ class CliUsageError extends Error {
 
 class CliInputError extends Error {
   constructor(
-    readonly code: "input_read_failed" | "input_invalid_json" | "input_not_object",
+    readonly code:
+      | "input_read_failed"
+      | "input_invalid_json"
+      | "input_not_object"
+      | "criteria_read_failed"
+      | "criteria_invalid_json"
+      | "criteria_not_object"
+      | "invalid_criteria",
     message: string,
     sourceCause?: unknown,
   ) {
@@ -317,7 +434,7 @@ class CliInputError extends Error {
 
 class CliLookupError extends Error {
   constructor(
-    readonly code: "run_not_found" | "run_workflow_mismatch",
+    readonly code: "run_not_found" | "run_workflow_mismatch" | "evaluation_not_found",
     message: string,
   ) {
     super(message);

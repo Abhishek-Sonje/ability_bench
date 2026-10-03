@@ -7,6 +7,18 @@ not yet publish versioned releases.
 
 ## Unreleased
 
+### Added
+
+- Add `evaluate` for fresh explicit baseline/candidate evaluation and `evaluation` for
+  exact verified receipt lookup. Load suites lazily from optional configuration, require
+  criteria files, preserve execution history, and distinguish assertion failure (1),
+  command failure (2), and evaluator error (3). Cover the built executable end to end.
+
+### Fixed
+
+- Return absent receipt lookup without creating storage when the storage root is missing,
+  preserving invalid-ID and containment errors.
+
 ### Changed
 
 - Specify the next bounded evaluation CLI slice: lazy suite loading, explicit run pairs,
