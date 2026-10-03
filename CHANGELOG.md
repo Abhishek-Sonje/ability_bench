@@ -9,6 +9,8 @@ not yet publish versioned releases.
 
 ### Changed
 
+- Record completed evaluation stabilization, user-reported audit pass, and verified
+  Windows/Ubuntu CI for `23ad85d`, keeping independent usability and release gates explicit.
 - Type-check all SDK example TypeScript alongside source and tests in the quality gate.
 - Show actual execution status separately from decisions in the Composio demo console,
   so failed reports and skipped delivery cannot be mistaken for successful executions;

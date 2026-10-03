@@ -3,12 +3,15 @@
 AbilityBench is an experimental local-first execution engine for dependency-aware incremental
 workflow runs.
 
-The current milestone is deliberately narrow: Phase 0 proves that a fully declared DAG can reuse
-valid artifacts from one immutable baseline and conservatively rerun affected stages.
+The implemented scope is deliberately narrow: a fully declared DAG, conservative
+reuse from one immutable baseline, a local execution CLI, and deterministic SDK
+evaluation with separately verified immutable receipts.
 
 ## Status
 
-Phase 0 is under active development. Its execution contract and current SDK usage are documented:
+The execution and evaluation prototypes are implemented and verified on Windows and
+Ubuntu through commit `23ad85d`. The audit was reported as passed by the user;
+independent usability and public-release decisions remain open. Contracts and usage:
 
 - [Product plan](./plan.md)
 - [Phase 0 execution contract](./execution-contract.md)

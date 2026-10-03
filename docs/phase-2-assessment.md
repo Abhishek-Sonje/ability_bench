@@ -2,8 +2,12 @@
 
 ## Decision
 
-Technical prototype: go for another small offline integration.
+Technical prototype: complete and stabilized for developer-local use.
 Public-release and independent-usability gate: still open.
+
+The user reported the audit as passed. This stabilization pass verified CI rather than
+performing or claiming another code audit. No independent-workflow exercise details
+were supplied, so the distinct usability gate is not inferred from that report.
 
 The deterministic evaluator can now compare one immutable baseline and its direct
 candidate, distinguish absolute failure from regression, preserve error diagnostics,
@@ -21,8 +25,10 @@ comparison, receipt lookup, and unchanged execution manifests.
 
 All SDK example TypeScript files now participate in the repository type-check gate.
 Existing engine, CLI, storage, captured-data demo, and evaluation tests run together.
-The local gate passed with 180 active tests and one platform-specific skip. Windows
-and Ubuntu CI must confirm this commit before its matrix coverage is claimed.
+The local Windows gate passed with 180 active tests and one platform-specific skip.
+Both [Windows and Ubuntu CI](https://github.com/Abhishek-Sonje/ability_bench/actions/runs/37112755199)
+passed for implementation commit `23ad85d2c80ee9cf15c30647b96e8bc09485fb24`. This verifies
+the implementation through that commit, not later changes or additional platforms.
 
 ## Usability findings
 
@@ -69,8 +75,10 @@ The real suite repeated count/list criteria validation in two callbacks. This is
 small enough that a schema framework is unjustified. A compact console plus retained
 structured receipts is adequate for this exercise. Typed criteria descriptors remain
 a possible bounded SDK improvement, not a prerequisite to claim technical functionality.
-Confirm the new CI results and collect independent modeling feedback before deciding
-whether more API surface solves a real usability problem.
+CI is confirmed. Collect independent modeling feedback before deciding whether more
+API surface solves a real usability problem. A minimal evaluation CLI is a possible
+next bounded slice, but needs its own command/exit-status contract before code. No
+CLI implementation or new feature scope is part of this stabilization pass.
 
 Evaluation CLI commands, scores, caches, SQLite, UI, providers, cost accounting, cloud,
 automatic baseline promotion, and public packaging remain deferred. Independent

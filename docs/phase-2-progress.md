@@ -113,9 +113,10 @@ The [synthetic walkthrough](../examples/evaluation-regression/README.md) and
 [maintainer assessment](./phase-2-assessment.md) are complete. The next bounded
 integration over captured Composio screening outputs is now complete, with membership/
 uniqueness and count-policy checks, skipped failed executions, and retained verified
-history. Source writes and output aliases into the source project are rejected. Current
-implementation commits still need Windows/Ubuntu CI confirmation, and independent
-usability/public-release ownership gates remain open.
+history. Source writes and output aliases into the source project are rejected.
+Implementation through `23ad85d` passed both Windows and Ubuntu CI, as recorded in
+the assessment. The user reports an audit pass. Independent usability and public-release
+ownership gates remain separate; no additional features are started by stabilization.
 
 Do not add a CLI, scoring framework, evaluator cache, provider adapter, database,
 or UI as part of these slices. Independent usability and public-release ownership
