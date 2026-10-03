@@ -45,6 +45,9 @@ not yet publish versioned releases.
 
 ### Added
 
+- Offline policy evaluation of captured Composio screening reports, retained verified
+  execution/evaluation history, explicit unevaluated failures, stricter-criterion
+  comparisons, and review-path protections preserving the read-only source boundary.
 - Runnable branch-and-join evaluation walkthrough demonstrating intentional regression
   and absolute-failure/no-regression cases, retained verified history, a compiled-process
   regression test, and a documented maintainer assessment.

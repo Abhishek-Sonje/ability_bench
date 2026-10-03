@@ -81,9 +81,16 @@ Remaining tradeoffs do not need infrastructure changes:
 - Screening counts evidence entries, not unique URLs, and filename identities do not
   resolve conflicting research snapshots. Those are documented demo semantics, not
   evaluation-quality guarantees.
-- The temporary store is removed, so the generated report supports review but not later
-  CLI inspection of those run IDs. Persistent-history usability is separately tested
-  by the CLI suite; this demo must not claim to exercise that interactive workflow.
+- The demo now copies its completed local project/store to a unique retained `history-*`
+  directory before temporary cleanup. The generated report names the copied config and
+  store paths, enabling exact CLI run inspection and SDK evaluation receipt lookup.
+  This is local history, not upstream tool replay or a portable archive.
 
 Assessment: no execution-correctness blocker was found in this walkthrough. This is
 maintainer self-review, not independent validation, and does not close that release gate.
+
+The follow-up offline evaluation run checked record identity/uniqueness and a declared
+minimum candidate count against all completed candidates. It detected the zero-candidate
+high-confidence policy case and kept intentional execution failure unevaluated. It also
+verified a same-pair stricter-criteria receipt with absolute failure but no new regression.
+None of these checks grades source freshness, factual correctness, or actual service capability.

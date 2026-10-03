@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   decodeArtifact,
   diffRunManifests,
+  evaluateRunPair,
   FileArtifactStore,
+  FileEvaluationReceiptStore,
   loadWorkflowConfig,
   planWorkflowRun,
   runWorkflow,
@@ -16,6 +18,32 @@ import {
 const sourceRoot = resolve(process.argv[2] ?? "../composio-agent");
 const exampleRoot = fileURLToPath(new URL("./", import.meta.url));
 const outputRoot = resolve(process.argv[3] ?? join(exampleRoot, ".abilitybench"));
+// The review path must not turn this read-only integration into a source-project write.
+const lexicalRemainder = relative(sourceRoot, outputRoot);
+assert(
+  lexicalRemainder === ".." ||
+    lexicalRemainder.startsWith(`..${sep}`) ||
+    isAbsolute(lexicalRemainder),
+  "Review output must be outside the source project.",
+);
+const physicalSourceRoot = await realpath(sourceRoot);
+let existingOutput = outputRoot;
+while (true) {
+  try {
+    const physicalOutput = await realpath(existingOutput);
+    const remainder = relative(physicalSourceRoot, physicalOutput);
+    assert(
+      remainder === ".." || remainder.startsWith(`..${sep}`) || isAbsolute(remainder),
+      "Review output must be outside the source project.",
+    );
+    break;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+    const parent = dirname(existingOutput);
+    if (parent === existingOutput) throw error;
+    existingOutput = parent;
+  }
+}
 const schemaPath = join(sourceRoot, "src", "agent", "result-schema.ts");
 const { appResearchResultSchema } = await import(pathToFileURL(schemaPath).href);
 const sourceFiles = (await readdir(join(sourceRoot, "results")))
@@ -77,6 +105,12 @@ try {
     join(demoRoot, "workflow.ts"),
     workflowSource.replace('from "abilitybench"', `from ${JSON.stringify(sdkUrl)}`),
   );
+  const evaluationSource = await readFile(new URL("./evaluation.ts", import.meta.url), "utf8");
+  await writeFile(
+    join(demoRoot, "evaluation.ts"),
+    evaluationSource.replace('from "abilitybench"', `from ${JSON.stringify(sdkUrl)}`),
+  );
+  const { default: suite } = await import(pathToFileURL(join(demoRoot, "evaluation.ts")).href);
   await writeFile(
     join(demoRoot, "abilitybench.config.ts"),
     'export default { workflow: "./workflow.ts" };',
@@ -98,6 +132,9 @@ try {
     "cache_disabled",
   );
   const outcomes = [];
+  const evaluations = [];
+  const receiptStore = new FileEvaluationReceiptStore(join(demoRoot, ".abilitybench"));
+  const criteria = { knownRecords: inputs.apps, minimumCandidates: 1 };
   const artifacts = new FileArtifactStore(join(demoRoot, ".abilitybench"));
   const reportOutput = async (result) => {
     const hash = result.manifest.stages.find(
@@ -118,6 +155,21 @@ try {
     console.log(
       `${scenario}: ${result.manifest.stages.map((stage) => `${stage.stageId}=${stage.executionStatus}[decision=${stage.finalDecision}; reason=${stage.decisionReason}]`).join(", ")}`,
     );
+    if (result.manifest.executionStatus === "completed") {
+      const receipt = await evaluateRunPair(suite, {
+        baselineRunId: baseline.manifest.id,
+        candidateRunId: result.manifest.id,
+        criteria,
+      });
+      assert.deepEqual(await receiptStore.get(receipt.id), receipt);
+      evaluations.push({ scenario, receipt });
+      console.log(
+        `  evaluation=${receipt.evaluationStatus}; comparison=${receipt.comparisonStatus}; candidates=${receipt.checks.find(({ checkId }) => checkId === "minimum-candidates").candidate.details.actual}`,
+      );
+    } else {
+      evaluations.push({ scenario, receipt: null, reason: "execution_not_completed" });
+      console.log("  evaluation=not_run; reason=execution_not_completed");
+    }
   };
   const candidate = async (options = {}) =>
     runWorkflow(workflow, { inputs, baseline: baselineSelection, environment, ...options });
@@ -164,11 +216,33 @@ try {
     "skipped_dependency_failed",
   );
   await record("intentional-failure", failed);
+  const unchangedReceipt = evaluations.find(({ scenario }) => scenario === "unchanged").receipt;
+  const stricterCriteria = { ...criteria, minimumCandidates: captured.length + 1 };
+  const bothFail = await evaluateRunPair(suite, {
+    baselineRunId: baseline.manifest.id,
+    candidateRunId: unchanged.manifest.id,
+    criteria: stricterCriteria,
+  });
+  assert.equal(bothFail.evaluationStatus, "failed");
+  assert.equal(bothFail.comparisonStatus, "no_regressions");
+  assert.deepEqual(await receiptStore.get(bothFail.id), bothFail);
+  assert.notEqual(bothFail.criteriaArtifactHash, unchangedReceipt.criteriaArtifactHash);
+  evaluations.push({ scenario: "both-fail-stricter-criterion", receipt: bothFail });
+  console.log(
+    `both-fail-stricter-criterion: evaluation=${bothFail.evaluationStatus}; comparison=${bothFail.comparisonStatus}`,
+  );
   const persisted = JSON.parse(
     await readFile(join(demoRoot, ".abilitybench", "runs", `${baseline.manifest.id}.json`), "utf8"),
   );
   assert.deepEqual(persisted, baseline.manifest);
   await mkdir(outputRoot, { recursive: true });
+  const retainedProjectRoot = await mkdtemp(join(outputRoot, "history-"));
+  await cp(demoRoot, retainedProjectRoot, { recursive: true });
+  const retainedStorageDir = join(retainedProjectRoot, ".abilitybench");
+  const retainedStore = new FileEvaluationReceiptStore(retainedStorageDir);
+  for (const { receipt } of evaluations) {
+    if (receipt !== null) assert.deepEqual(await retainedStore.get(receipt.id), receipt);
+  }
   await writeFile(
     join(outputRoot, "demo-results.json"),
     `${JSON.stringify(
@@ -185,6 +259,9 @@ try {
         baselineReport: await reportOutput(baseline),
         plan: plan.plan,
         outcomes,
+        evaluations,
+        retainedProjectRoot,
+        retainedStorageDir,
       },
       null,
       2,
@@ -194,6 +271,7 @@ try {
     `Validated ${captured.length} captured research records. All scenario assertions passed.`,
   );
   console.log(`Review: ${join(outputRoot, "demo-results.json")}`);
+  console.log(`Verified history retained: ${retainedStorageDir}`);
 } finally {
   await rm(demoRoot, { recursive: true, force: true });
 }

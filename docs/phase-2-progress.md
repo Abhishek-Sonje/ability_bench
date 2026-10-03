@@ -111,7 +111,9 @@ TypeScript now participates in the standard type-check gate.
 
 The [synthetic walkthrough](../examples/evaluation-regression/README.md) and
 [maintainer assessment](./phase-2-assessment.md) are complete. The next bounded
-integration is an offline suite over captured Composio screening outputs. Current
+integration over captured Composio screening outputs is now complete, with membership/
+uniqueness and count-policy checks, skipped failed executions, and retained verified
+history. Source writes and output aliases into the source project are rejected. Current
 implementation commits still need Windows/Ubuntu CI confirmation, and independent
 usability/public-release ownership gates remain open.
 

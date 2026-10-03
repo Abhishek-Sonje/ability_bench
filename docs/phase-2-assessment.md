@@ -21,7 +21,7 @@ comparison, receipt lookup, and unchanged execution manifests.
 
 All SDK example TypeScript files now participate in the repository type-check gate.
 Existing engine, CLI, storage, captured-data demo, and evaluation tests run together.
-The local gate passed with 178 active tests and one platform-specific skip. Windows
+The local gate passed with 180 active tests and one platform-specific skip. Windows
 and Ubuntu CI must confirm this commit before its matrix coverage is claimed.
 
 ## Usability findings
@@ -59,11 +59,18 @@ found in the exercised paths; that is not a guarantee for arbitrary callbacks/fi
 
 ## Next bounded work
 
-Apply a small deterministic suite to the saved Composio research screening outputs,
-without live providers or changes to the source project. Keep one explicit baseline,
-show policy changes separately from execution changes, and retain enough history for
-verified receipt lookup. Assess whether typed criteria or a compact receipt presentation
-is actually needed before proposing either.
+The saved Composio integration is complete: two explicit checks grade captured record
+membership/uniqueness and minimum candidate count, compare completed runs against one
+baseline, and retain verified receipts. The high-confidence policy yielded zero candidates
+and failed the minimum-count assertion; this is not a factual-quality judgment. The source
+project remained unchanged, and a retained run was inspected through the existing CLI.
+
+The real suite repeated count/list criteria validation in two callbacks. This is still
+small enough that a schema framework is unjustified. A compact console plus retained
+structured receipts is adequate for this exercise. Typed criteria descriptors remain
+a possible bounded SDK improvement, not a prerequisite to claim technical functionality.
+Confirm the new CI results and collect independent modeling feedback before deciding
+whether more API surface solves a real usability problem.
 
 Evaluation CLI commands, scores, caches, SQLite, UI, providers, cost accounting, cloud,
 automatic baseline promotion, and public packaging remain deferred. Independent
