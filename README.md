@@ -23,6 +23,8 @@ Phase 0 is under active development. Its execution contract and current SDK usag
 - [Phase 2 evaluation contract](./docs/phase-2-evaluation-spec.md)
 - [Phase 2 evaluation progress](./docs/phase-2-progress.md)
 - [Phase 2 immutable receipt storage](./docs/phase-2-storage.md)
+- [Evaluation regression walkthrough](./examples/evaluation-regression/README.md)
+- [Phase 2 assessment](./docs/phase-2-assessment.md)
 
 AbilityBench is not ready for production use.
 

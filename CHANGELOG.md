@@ -9,6 +9,7 @@ not yet publish versioned releases.
 
 ### Changed
 
+- Type-check all SDK example TypeScript alongside source and tests in the quality gate.
 - Show actual execution status separately from decisions in the Composio demo console,
   so failed reports and skipped delivery cannot be mistaken for successful executions;
   record maintainer walkthrough findings and verified Windows/Ubuntu CI for `9b447e9`.
@@ -43,6 +44,10 @@ not yet publish versioned releases.
   external input contracts and cache dependencies harder to omit or scatter.
 
 ### Added
+
+- Runnable branch-and-join evaluation walkthrough demonstrating intentional regression
+  and absolute-failure/no-regression cases, retained verified history, a compiled-process
+  regression test, and a documented maintainer assessment.
 
 - Immutable evaluation receipt publication and exact verified lookup, with archived
   suite identity, runtime metadata, source/criteria artifact verification, recomputed

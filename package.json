@@ -18,6 +18,7 @@
     "node": ">=24.20.0 <25"
   },
   "scripts": {
+    "example:evaluation-regression": "pnpm build && node examples/evaluation-regression/run.mjs",
     "example:composio-research": "pnpm build && node examples/composio-research/demo.mjs",
     "build": "tsc -p tsconfig.build.json",
     "check": "biome check . && tsc -p tsconfig.build.json && tsc -p tsconfig.json --noEmit && vitest run",

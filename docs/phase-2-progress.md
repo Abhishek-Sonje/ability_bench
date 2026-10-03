@@ -103,10 +103,17 @@ canonical fingerprints, watched-input instability, hostile error diagnostics, an
 byte-identical storage before/after successful evaluations.
 `tests/evaluation-receipt.test.ts` covers publication, historical lookup, tamper detection,
 references, error receipts, repeated execution, collisions, containment, and cleanup.
+`tests/evaluation-demo.test.ts` launches the actual regression walkthrough using the
+built SDK in an isolated project and verifies all retained receipts. All example
+TypeScript now participates in the standard type-check gate.
 
-## Remaining slices
+## Walkthrough and remaining product gates
 
-1. Synthetic intentional-regression walkthrough and usability assessment.
+The [synthetic walkthrough](../examples/evaluation-regression/README.md) and
+[maintainer assessment](./phase-2-assessment.md) are complete. The next bounded
+integration is an offline suite over captured Composio screening outputs. Current
+implementation commits still need Windows/Ubuntu CI confirmation, and independent
+usability/public-release ownership gates remain open.
 
 Do not add a CLI, scoring framework, evaluator cache, provider adapter, database,
 or UI as part of these slices. Independent usability and public-release ownership
