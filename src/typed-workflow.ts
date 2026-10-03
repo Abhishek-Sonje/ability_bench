@@ -126,6 +126,17 @@ export function isBuiltInInputDescriptor(value: unknown): value is AnyInputDescr
   return typeof value === "object" && value !== null && inputParsers.has(value);
 }
 
+/** Internal runtime parsing shared by stage and evaluation preparation. */
+export function parseBuiltInInputDescriptor(
+  descriptor: AnyInputDescriptor,
+  value: JsonValue | undefined,
+): unknown {
+  const parse = inputParsers.get(descriptor);
+  if (!parse)
+    throw new TypeError("Input descriptor was not created by the AbilityBench input API.");
+  return parse(value, descriptor.pointer);
+}
+
 function required<Value>(value: Value | undefined, pointer: string, expected: string): Value {
   if (value === undefined) {
     throw new InputValidationError("input_missing", pointer, expected);

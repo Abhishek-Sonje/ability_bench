@@ -135,7 +135,7 @@ export async function computeStageFingerprint(
   });
 }
 
-async function fingerprintWatchedFile(root: string, path: string): Promise<JsonObject> {
+export async function fingerprintWatchedFile(root: string, path: string): Promise<JsonObject> {
   const absoluteRoot = resolve(root);
   const absolutePath = resolve(absoluteRoot, path);
   assertInsideRoot(absoluteRoot, absolutePath, path);
@@ -243,7 +243,7 @@ function assertInsideRoot(root: string, target: string, declaredPath: string): v
   }
 }
 
-function resolveJsonPointer(
+export function resolveJsonPointer(
   root: JsonValue,
   pointer: string,
 ): { readonly found: true; readonly value: JsonValue } | { readonly found: false } {

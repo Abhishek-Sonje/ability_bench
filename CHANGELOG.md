@@ -44,6 +44,9 @@ not yet publish versioned releases.
 
 ### Added
 
+- Read-only evaluation pair preparation with direct immutable-baseline lineage checks,
+  verified artifacts, isolated typed selections, frozen criteria, suite identity,
+  explicit contract errors, and symlink/junction-aware storage boundaries.
 - Evaluation suite/check declarations using built-in typed artifact selectors, strict
   boolean result validation, pure verdict comparisons, and error-aware summaries;
   no evaluator execution, fingerprints, or receipt storage yet.

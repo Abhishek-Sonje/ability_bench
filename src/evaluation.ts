@@ -59,10 +59,16 @@ export interface BuiltEvaluationSuite {
 const definitions = new WeakMap<CheckHandle, EvaluationCheckDefinition>();
 // Keep callbacks private until the runner can validate and isolate selected artifacts.
 const callbacks = new WeakMap<object, unknown>();
+const suites = new WeakSet<object>();
 const ID_PATTERN = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
 
 function invalidSuite(message: string): never {
   throw new EvaluationValidationError("invalid_suite", message);
+}
+
+/** Internal provenance check: structural lookalikes are not sealed suites. */
+export function isBuiltEvaluationSuite(value: unknown): value is BuiltEvaluationSuite {
+  return typeof value === "object" && value !== null && suites.has(value);
 }
 
 /** Declares a check; never invokes its evaluator. */
@@ -177,7 +183,7 @@ export function createEvaluationSuite(options: {
     }
     const validated = builder.build();
     const byId = new Map(checks.map((check) => [check.id, check]));
-    return Object.freeze({
+    const suite: BuiltEvaluationSuite = Object.freeze({
       contractVersion: "phase2-evaluation-v1",
       id: options.id,
       workflowId: options.workflowId,
@@ -199,6 +205,8 @@ export function createEvaluationSuite(options: {
           .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)),
       ),
     });
+    suites.add(suite);
+    return suite;
   } catch (error: unknown) {
     if (error instanceof EvaluationValidationError) throw error;
     invalidSuite(error instanceof Error ? error.message : "Unable to validate evaluation suite.");
@@ -231,7 +239,7 @@ export function validateCheckResult(value: unknown): CheckResult {
   }
 }
 
-function freezeJson(value: unknown): void {
+export function freezeJson(value: unknown): void {
   if (value !== null && typeof value === "object") {
     for (const child of Object.values(value)) freezeJson(child);
     Object.freeze(value);
