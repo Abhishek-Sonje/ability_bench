@@ -57,7 +57,7 @@ export interface BuiltEvaluationSuite {
 }
 
 const definitions = new WeakMap<CheckHandle, EvaluationCheckDefinition>();
-// Keep callbacks private until the runner can validate and isolate selected artifacts.
+// Callbacks are accessible only to the internal runner after preparation.
 const callbacks = new WeakMap<object, unknown>();
 const suites = new WeakSet<object>();
 const ID_PATTERN = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
@@ -69,6 +69,21 @@ function invalidSuite(message: string): never {
 /** Internal provenance check: structural lookalikes are not sealed suites. */
 export function isBuiltEvaluationSuite(value: unknown): value is BuiltEvaluationSuite {
   return typeof value === "object" && value !== null && suites.has(value);
+}
+
+/** Internal typed erasure boundary; artifact selections are validated by preparation. */
+export function getCheckEvaluator(
+  check: EvaluationCheckDefinition,
+): (context: {
+  readonly output: Readonly<Record<string, unknown>>;
+  readonly criteria: Readonly<JsonObject>;
+}) => unknown | Promise<unknown> {
+  const callback = callbacks.get(check);
+  if (typeof callback !== "function") invalidSuite("Missing declared evaluator callback.");
+  return callback as (context: {
+    readonly output: Readonly<Record<string, unknown>>;
+    readonly criteria: Readonly<JsonObject>;
+  }) => unknown | Promise<unknown>;
 }
 
 /** Declares a check; never invokes its evaluator. */

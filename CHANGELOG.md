@@ -44,6 +44,9 @@ not yet publish versioned releases.
 
 ### Added
 
+- Sequential in-memory evaluation runner with canonical per-side fingerprints, explicit
+  error continuation, full-suite implementation stability checks, immutable contexts,
+  and no evaluation caching or storage writes.
 - Read-only evaluation pair preparation with direct immutable-baseline lineage checks,
   verified artifacts, isolated typed selections, frozen criteria, suite identity,
   explicit contract errors, and symlink/junction-aware storage boundaries.

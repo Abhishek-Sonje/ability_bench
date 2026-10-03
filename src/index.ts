@@ -27,6 +27,13 @@ export {
   validateCheckResult,
 } from "./evaluation.js";
 export {
+  type EvaluatedCheckPair,
+  type EvaluatedCheckSide,
+  EvaluationExecutionError,
+  type EvaluationExecutionResult,
+  executeEvaluationPair,
+} from "./evaluation-execution.js";
+export {
   EvaluationPairError,
   type EvaluationPairErrorCode,
   type PreparedCheckSide,

@@ -1,8 +1,9 @@
 # Phase 2: Deterministic evaluation contract
 
 Status: implementation contract in progress. Suite declarations, pure result/comparison
-validation, and read-only pair preparation are implemented; see [progress](./phase-2-progress.md).
-The runner, loader, CLI commands, invocation fingerprints, and receipt storage remain unimplemented.
+validation, read-only pair preparation, and sequential in-memory evaluation with
+invocation fingerprints are implemented; see [progress](./phase-2-progress.md).
+The loader, CLI commands, and receipt storage remain unimplemented.
 The Phase 0 execution contract and Phase 1
 CLI remain authoritative for existing behavior. Drafting this design does not close
 the independent-workflow usability gate or authorize a public release.

@@ -167,6 +167,33 @@ export async function prepareEvaluationPair(
       );
     decoded.set(hash, decodeArtifact(artifact));
   }
+  const { suiteDescriptor, suiteHash } = await snapshotEvaluationSuite(suite, storageDir);
+  const checks = sources.map(({ check, baselineHash, candidateHash }) =>
+    Object.freeze({
+      checkId: check.id,
+      targetStageId: check.targetStage,
+      baseline: select(check, baselineHash, decoded.get(baselineHash)),
+      candidate: select(check, candidateHash, decoded.get(candidateHash)),
+    }),
+  );
+  return Object.freeze({
+    storageDir,
+    baseline,
+    candidate,
+    criteria,
+    criteriaArtifactHash: createArtifact(criteria).contentHash,
+    suiteDescriptor,
+    suiteHash,
+    checks: Object.freeze(checks),
+  });
+}
+
+/** Internal implementation snapshot shared by preparation and stability checks. */
+export async function snapshotEvaluationSuite(
+  suite: BuiltEvaluationSuite,
+  storageDir: string,
+): Promise<{ readonly suiteDescriptor: JsonObject; readonly suiteHash: string }> {
+  await resolveContainedPath(suite.root, storageDir);
   const watched = new Map<string, JsonObject>();
   const physicalStorage = await realpath(storageDir);
   for (const path of [...new Set(suite.checks.flatMap(({ files }) => files))].sort()) {
@@ -212,24 +239,7 @@ export async function prepareEvaluationPair(
   };
   freezeJson(suiteDescriptor);
   const suiteHash = `sha256:${createHash("sha256").update("abilitybench/evaluation-suite/v1\0").update(canonicalizeJson(suiteDescriptor)).digest("hex")}`;
-  const checks = sources.map(({ check, baselineHash, candidateHash }) =>
-    Object.freeze({
-      checkId: check.id,
-      targetStageId: check.targetStage,
-      baseline: select(check, baselineHash, decoded.get(baselineHash)),
-      candidate: select(check, candidateHash, decoded.get(candidateHash)),
-    }),
-  );
-  return Object.freeze({
-    storageDir,
-    baseline,
-    candidate,
-    criteria,
-    criteriaArtifactHash: createArtifact(criteria).contentHash,
-    suiteDescriptor,
-    suiteHash,
-    checks: Object.freeze(checks),
-  });
+  return Object.freeze({ suiteDescriptor, suiteHash });
 }
 
 function targetArtifact(run: FinalizedRunManifest, stageId: string): string {
