@@ -80,6 +80,11 @@ API surface solves a real usability problem. A minimal evaluation CLI is a possi
 next bounded slice, but needs its own command/exit-status contract before code. No
 CLI implementation or new feature scope is part of this stabilization pass.
 
+Following stabilization, the next CLI slice is now
+[specified separately](./phase-2-cli.md): fresh evaluation and exact receipt lookup,
+with lazy evaluator loading and distinct assertion/command/evaluator exit statuses.
+This specification does not implement those commands or close the usability gate.
+
 Evaluation CLI commands, scores, caches, SQLite, UI, providers, cost accounting, cloud,
 automatic baseline promotion, and public packaging remain deferred. Independent
 workflow modeling and release ownership decisions are not closed by this assessment.

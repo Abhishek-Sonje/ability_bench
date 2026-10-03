@@ -9,6 +9,9 @@ not yet publish versioned releases.
 
 ### Changed
 
+- Specify the next bounded evaluation CLI slice: lazy suite loading, explicit run pairs,
+  required criteria, exact receipt lookup, machine envelopes, and distinct exit statuses.
+  No CLI commands are implemented by this documentation change.
 - Record completed evaluation stabilization, user-reported audit pass, and verified
   Windows/Ubuntu CI for `23ad85d`, keeping independent usability and release gates explicit.
 - Type-check all SDK example TypeScript alongside source and tests in the quality gate.

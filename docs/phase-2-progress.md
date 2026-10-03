@@ -118,6 +118,9 @@ Implementation through `23ad85d` passed both Windows and Ubuntu CI, as recorded 
 the assessment. The user reports an audit pass. Independent usability and public-release
 ownership gates remain separate; no additional features are started by stabilization.
 
-Do not add a CLI, scoring framework, evaluator cache, provider adapter, database,
-or UI as part of these slices. Independent usability and public-release ownership
+The next bounded slice has a [specified evaluation CLI contract](./phase-2-cli.md),
+not an implementation. It adds only fresh evaluation and exact receipt inspection;
+the completed SDK slices above do not retroactively include CLI functionality.
+Do not add a scoring framework, evaluator cache, provider adapter, database,
+or UI. Independent usability and public-release ownership
 gates remain open; implementation tests do not close them.
