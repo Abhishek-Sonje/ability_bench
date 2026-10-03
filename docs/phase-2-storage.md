@@ -79,5 +79,6 @@ Integration tests cover publication, historical lookup, recomputed fingerprints 
 summaries, error receipts, missing/corrupt references, noncanonical bytes, collisions,
 failed-publication cleanup, final guards, and symlink/junction escapes.
 
-No evaluation CLI, mutable index, receipt listing, SQLite, cleanup, automatic baseline
+The [evaluation CLI](./phase-2-cli.md) delegates fresh publication and exact lookup
+to these same SDK operations. No mutable index, receipt listing, SQLite, cleanup, automatic baseline
 promotion, scoring, result caching, providers, or cloud functionality is included.

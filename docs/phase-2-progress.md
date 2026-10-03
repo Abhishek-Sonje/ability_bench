@@ -3,7 +3,8 @@
 The [evaluation contract](./phase-2-evaluation-spec.md) guides this work. Only the
 declaration, pure comparison, read-only pair preparation, and the sequential evaluator
 runner, immutable receipt publication, and exact verified lookup are implemented.
-Existing execution manifests, CLI commands, and baseline eligibility are unchanged.
+Existing execution manifests, execution CLI behavior, and baseline eligibility are unchanged.
+The bounded evaluation CLI now delegates to these SDK operations.
 
 ## Available SDK surface
 
@@ -118,9 +119,11 @@ Implementation through `23ad85d` passed both Windows and Ubuntu CI, as recorded 
 the assessment. The user reports an audit pass. Independent usability and public-release
 ownership gates remain separate; no additional features are started by stabilization.
 
-The next bounded slice has a [specified evaluation CLI contract](./phase-2-cli.md),
-not an implementation. It adds only fresh evaluation and exact receipt inspection;
-the completed SDK slices above do not retroactively include CLI functionality.
+The [evaluation CLI contract](./phase-2-cli.md) is implemented: fresh evaluation of
+explicit pairs and exact receipt inspection, optional lazy suite loading, explicit criteria,
+and separate assertion/command/evaluator exit statuses. Built-process tests exercise
+branch-and-join pairs, historical lookup without callbacks, immutable execution history,
+repeated fresh invocation, containment, corruption, instability, and publication failure.
 Do not add a scoring framework, evaluator cache, provider adapter, database,
 or UI. Independent usability and public-release ownership
 gates remain open; implementation tests do not close them.

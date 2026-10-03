@@ -46,8 +46,22 @@ Use the existing CLI to inspect execution IDs from the review JSON:
 node dist/cli.js inspect run_<digest> --config examples/evaluation-regression/abilitybench.config.ts
 ```
 
-Exact evaluation receipt lookup uses the SDK `FileEvaluationReceiptStore`, as shown
-in [storage documentation](../../docs/phase-2-storage.md). There is no evaluation CLI.
+Evaluate a completed pair using the IDs printed in the review JSON:
+
+```powershell
+node dist/cli.js evaluate run_<baseline-digest> run_<candidate-digest> --criteria examples/evaluation-regression/criteria.json --config examples/evaluation-regression/abilitybench.config.ts
+```
+
+This invokes checks fresh and retains a new receipt. A policy failure exits 1;
+command failures exit 2; evaluator errors exit 3. Inspect its exact receipt ID:
+
+```powershell
+node dist/cli.js evaluation eval_<digest> --config examples/evaluation-regression/abilitybench.config.ts --json
+```
+
+Verified inspection exits 0 even for a failing historical verdict and never imports
+the evaluation module. SDK lookup remains available through `FileEvaluationReceiptStore`,
+as shown in [storage documentation](../../docs/phase-2-storage.md).
 Execution inspection still shows its original `evaluationStatus: "not_run"`; later
 evaluation results live only in separate receipts.
 

@@ -4,14 +4,17 @@ AbilityBench is an experimental local-first execution engine for dependency-awar
 workflow runs.
 
 The implemented scope is deliberately narrow: a fully declared DAG, conservative
-reuse from one immutable baseline, a local execution CLI, and deterministic SDK
+reuse from one immutable baseline, a local execution/evaluation CLI, and deterministic SDK
 evaluation with separately verified immutable receipts.
 
 ## Status
 
-The execution and evaluation prototypes are implemented and verified on Windows and
-Ubuntu through commit `23ad85d`. The audit was reported as passed by the user;
-independent usability and public-release decisions remain open. Contracts and usage:
+The developer-local technical scope is complete, including the evaluation CLI.
+Implementation commit `0692ca3` passed the local Windows quality gate (187 active tests,
+one POSIX-only skip). Windows/Ubuntu CI is verified through `23ad85d`; CI for the new
+CLI commit awaits a push. The audit was reported as passed by the user.
+Independent usability and public-release decisions remain open. See the
+[completion report](./docs/project-completion.md). Contracts and usage:
 
 - [Product plan](./plan.md)
 - [Phase 0 execution contract](./execution-contract.md)
@@ -22,6 +25,7 @@ independent usability and public-release decisions remain open. Contracts and us
 - [Platform support](./docs/platform-support.md)
 - [Release-readiness example](./examples/release-readiness/README.md)
 - [Phase 1 local CLI](./docs/phase-1-cli.md)
+- [Evaluation CLI and exit-status contract](./docs/phase-2-cli.md)
 - [Phase 1 readiness and external verification](./docs/phase-1-readiness.md)
 - [Phase 2 evaluation contract](./docs/phase-2-evaluation-spec.md)
 - [Phase 2 evaluation progress](./docs/phase-2-progress.md)
@@ -126,6 +130,20 @@ Every subcommand accepts only its documented options. With `--json`, command fai
 versioned `phase1-cli-error-v1` document on stderr instead of human-formatted text.
 
 ## Development
+
+Evaluate two explicitly selected completed runs with the optional `evaluation` module
+configured in `abilitybench.config.ts`:
+
+```bash
+node dist/cli.js evaluate run_<baseline> run_<candidate> --criteria ./criteria.json --json
+node dist/cli.js evaluation eval_<digest> --json
+```
+
+Evaluation writes a separate immutable receipt, never modifies execution history, and
+always invokes checks fresh. Exit codes are 0 for passing/no-regression, 1 for policy
+failure, 2 for command failure, and 3 for evaluator errors. Exact verified inspection
+exits 0 regardless of the historical verdict and does not load evaluator code.
+See the [runnable walkthrough](./examples/evaluation-regression/README.md).
 
 For an offline branch-and-join demo using saved research from a sibling Composio
 project, see [the Composio research example](./examples/composio-research/README.md).

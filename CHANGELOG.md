@@ -21,6 +21,8 @@ not yet publish versioned releases.
 
 ### Changed
 
+- Record developer-local technical completion, runnable evaluation CLI usage, and
+  remaining cross-platform CI, independent-usability, and public-release gates.
 - Specify the next bounded evaluation CLI slice: lazy suite loading, explicit run pairs,
   required criteria, exact receipt lookup, machine envelopes, and distinct exit statuses.
   No CLI commands are implemented by this documentation change.
