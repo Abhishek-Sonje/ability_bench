@@ -11,8 +11,8 @@ evaluation with separately verified immutable receipts.
 
 The developer-local technical scope is complete, including the evaluation CLI.
 Implementation commit `0692ca3` passed the local Windows quality gate (187 active tests,
-one POSIX-only skip). Windows/Ubuntu CI is verified through `23ad85d`; CI for the new
-CLI commit awaits a push. The audit was reported as passed by the user.
+one POSIX-only skip). Windows/Ubuntu CI is verified through `6675717`, including
+the evaluation CLI. The audit was reported as passed by the user.
 Independent usability and public-release decisions remain open. See the
 [completion report](./docs/project-completion.md). Contracts and usage:
 

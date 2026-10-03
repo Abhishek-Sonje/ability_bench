@@ -27,16 +27,17 @@ containment, corrupt inputs/history, immutable manifests, and publication failur
 of its unchanged candidate passed; exact CLI inspection of its regression receipt
 showed completed execution, failed candidate evaluation, and regression separately.
 
-Windows/Ubuntu CI was previously verified through `23ad85d` in the
-[assessment](./phase-2-assessment.md). That evidence does not verify `0692ca3`.
-New CI requires pushing these local commits; no push or release has been performed.
+Both Windows and Ubuntu quality jobs passed for completion commit
+`6675717bded85b8447a75bd5d5f8483936be4a34`, including evaluation CLI implementation.
+The [verified CI run](https://github.com/Abhishek-Sonje/ability_bench/actions/runs/37117289095)
+closes the cross-platform technical gate for that commit. This agent did not push or
+publish a release; the completed commit is now present in GitHub CI.
 The audit pass is user-reported, not a newly claimed independent review.
 
 ## Remaining validation/release gates
 
-1. Push the completed commits when authorized and confirm Windows/Ubuntu CI for them.
-2. Collect independent developer feedback on workflow modeling and decision explanations.
-3. Before a public release, decide package ownership/name, license, initial version,
+1. Collect independent developer feedback on workflow modeling and decision explanations.
+2. Before a public release, decide package ownership/name, license, initial version,
    compatibility policy, and support commitments; verify package contents and installation.
 
 These are verification and product-ownership gates, not missing engine/CLI features.

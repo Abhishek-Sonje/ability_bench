@@ -21,6 +21,9 @@ not yet publish versioned releases.
 
 ### Changed
 
+- Confirm Windows/Ubuntu CI for completion commit `6675717`, including the evaluation
+  CLI; close the cross-platform technical gate while retaining independent usability
+  and public-release ownership gates.
 - Record developer-local technical completion, runnable evaluation CLI usage, and
   remaining cross-platform CI, independent-usability, and public-release gates.
 - Specify the next bounded evaluation CLI slice: lazy suite loading, explicit run pairs,

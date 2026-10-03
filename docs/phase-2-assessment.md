@@ -85,7 +85,9 @@ Following stabilization, the bounded CLI slice is now
 with lazy evaluator loading and distinct assertion/command/evaluator exit statuses.
 Implementation commit `0692ca3` passed the full local Windows quality gate with 187
 active tests and one POSIX-only skip. The prior CI evidence above does not cover this
-new commit; Windows/Ubuntu CI confirmation remains pending until it is pushed.
+new commit. Both platform jobs subsequently passed for completion commit `6675717`
+in [this verified run](https://github.com/Abhishek-Sonje/ability_bench/actions/runs/37117289095),
+covering the new CLI implementation and closing its cross-platform verification gate.
 The synthetic walkthrough also passed after CLI implementation. These verifications
 complete the developer-local technical scope, not the independent usability gate.
 
