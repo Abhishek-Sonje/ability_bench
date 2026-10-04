@@ -94,10 +94,13 @@ export function usageFromResponse(response) {
 
 /** Hard attempt/output/time limits plus conservative client-side spend reservations. */
 export class Budget {
-  constructor() {
+  constructor(priorReservedUsd = 0) {
+    if (!Number.isFinite(priorReservedUsd) || priorReservedUsd < 0 || priorReservedUsd > 0.1)
+      throw new Error("Invalid prior experiment reservation.");
     this.started = performance.now();
     this.attempts = 0;
-    this.reservedUsd = 0;
+    this.priorReservedUsd = priorReservedUsd;
+    this.reservedUsd = priorReservedUsd;
     this.measuredUsd = 0;
     this.unknownUsage = false;
   }
@@ -121,7 +124,7 @@ export class Budget {
   record(usage) {
     this.measuredUsd += usage.estimatedCostUsd;
     if (
-      this.measuredUsd > 0.1 ||
+      this.priorReservedUsd + this.measuredUsd > 0.1 ||
       usage.inputTokens > 4096 ||
       usage.outputTokens + usage.thinkingTokens > SETTINGS.maxOutputTokens
     ) {

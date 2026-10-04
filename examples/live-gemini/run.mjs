@@ -30,8 +30,23 @@ if (!apiKey)
   throw new Error("Set GEMINI_API_KEY or supply --env-file. Never paste keys into chat.");
 const evidenceParent = join(import.meta.dirname, ".abilitybench");
 await mkdir(evidenceParent, { recursive: true });
+let priorReservedUsd = 0;
+for (const name of await readdir(evidenceParent)) {
+  if (!name.startsWith("experiment-")) continue;
+  try {
+    const previous = JSON.parse(
+      await readFile(join(evidenceParent, name, "usage-ledger.json"), "utf8"),
+    );
+    const reservation = previous.budget.reservedUsd - (previous.budget.priorReservedUsd ?? 0);
+    if (!Number.isFinite(reservation) || reservation < 0)
+      throw new Error("Invalid retained budget ledger.");
+    priorReservedUsd += reservation;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
 const evidence = await mkdtemp(join(evidenceParent, "experiment-"));
-const budget = new Budget();
+const budget = new Budget(priorReservedUsd);
 const ledger = [];
 const measurements = [];
 let resolvedModelVersion = null;
@@ -306,6 +321,7 @@ try {
   const report = {
     status: "completed",
     runtime: { nodeVersion: process.version, platform: process.platform, arch: process.arch },
+    priorReservedUsd,
     settings: SETTINGS,
     resolvedModelVersion,
     pricing: PRICING,

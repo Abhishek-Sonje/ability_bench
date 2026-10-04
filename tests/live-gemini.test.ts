@@ -43,6 +43,8 @@ describe("live Gemini adapter offline guardrails", () => {
       const unknown = new Budget(); unknown.unknownUsage = true; assert.throws(() => unknown.reserve(body), /unknown usage/);
       const expired = new Budget(); expired.started -= 300001; assert.throws(() => expired.reserve(body), /Five-minute/);
       const spent = new Budget(); spent.reservedUsd = .099; assert.throws(() => spent.reserve(body), /reservation/);
+      const carried = new Budget(.099); assert.equal(carried.priorReservedUsd, .099); assert.throws(() => carried.reserve(body), /reservation/);
+      assert.throws(() => new Budget(-1), /Invalid prior/);
       const exceeded = new Budget(); assert.throws(() => exceeded.record({ ...usage, inputTokens: 4097 }), /exceeded/); assert.equal(exceeded.unknownUsage, true);
       console.log('guardrails passed');
     `;
