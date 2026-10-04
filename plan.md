@@ -3,7 +3,7 @@
 > **Current status (2026-10-04):** The revised Phase 0 engine, local execution/evaluation CLI,
 > and deterministic evaluation receipts are implemented. The read-only viewer uses the existing
 > Node/TypeScript stack and plain browser modules (not the older Next.js proposal below).
-> Retained-data checks pass; browser acceptance remains open. See `docs/phase-3-viewer-usage.md`.
+> Retained-data checks pass; the user accepted the viewer milestone. See `docs/phase-3-viewer-usage.md`.
 > The normative execution
 > contract is in `execution-contract.md`, verification and assessment are under `docs/`, and
 > Phase 1 currently means the narrow local CLI specified in `docs/phase-1-cli.md`. Those documents

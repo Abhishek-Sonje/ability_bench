@@ -46,7 +46,7 @@ Before a public release, decide package ownership/name, license, initial version
    compatibility policy, and support commitments; verify package contents and installation.
 Release work is currently deferred. The authorized read-only local viewer is now
 implemented on the existing storage boundary, without engine changes or a frontend
-framework. Retained-data checks pass; browser acceptance remains open. See the
+framework. Retained-data checks pass and the user accepted the viewer milestone. See the
 [viewer usage and verification record](./phase-3-viewer-usage.md).
 
 These are verification and product-ownership gates, not missing engine/CLI features.

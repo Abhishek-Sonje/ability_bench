@@ -51,9 +51,9 @@ node scripts/verify-viewer-history.mjs .abilitybench/usability-composio-20261003
 node scripts/verify-viewer-history.mjs examples/composio-research/.abilitybench/history-8lo2nI/.abilitybench composio-research-screening
 ```
 
-**Browser acceptance remains open.** The session's browser inventory is empty and the in-app browser is unavailable. Desktop/mobile screenshots, keyboard interaction, real artifact/receipt interaction, console/CSP errors, and the independent visual finish review have not been completed. The Impeccable detector ran once in degraded regex-only mode (parser modules unavailable); no findings is not a rendered accessibility/contrast pass. The visual design record will be finalized after that review, not represented as approved now.
+**Milestone closed by user verification.** The user inspected the viewer, reported that it looks good, and explicitly accepted the read-only viewer milestone. Agent-side browser automation remained unavailable; desktop/mobile screenshots and an independent automated visual finish review are not claimed. The Impeccable detector ran once in degraded regex-only mode (parser modules unavailable); no findings is not a rendered accessibility/contrast pass. User acceptance closes this milestone without inventing that missing evidence.
 
-The next verification is bounded: open the final independent unchanged/failure runs and the screening environment-change receipt; confirm graph joins, both skip explanations, receipt reset on run change, output warnings, keyboard focus, and no mobile page overflow. Then capture desktop/mobile and complete the finish review. No new product features are needed for that check.
+No further UI features are authorized unless a real usability issue appears. The next milestone is a separately budgeted live Gemini experiment, not more viewer work.
 
 ## Limits
 

@@ -5,7 +5,9 @@ using the user-approved existing Node/TypeScript stack and native browser module
 This document remains the engineering/data boundary; the
 [screen hierarchy](./phase-3-viewer-experience.md) and
 [usage/acceptance record](./phase-3-viewer-usage.md) describe the implementation.
-Browser acceptance remains open. No extra execution-engine capability is included.
+The user inspected and accepted this milestone; agent-side browser verification is not claimed.
+No extra execution-engine capability is included. Further UI features are deferred unless
+a real usability issue appears.
 
 ## Purpose and scope
 

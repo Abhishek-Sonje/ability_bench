@@ -16,7 +16,8 @@ the evaluation CLI. The audit was reported as passed by the user.
 The [independent workflow usability gate](./docs/independent-workflow-validation.md)
 is closed after the user-modeled Composio exercise and explicit ordering verification.
 The plain-browser read-only viewer is implemented and its retained-data checks pass;
-browser interaction/visual acceptance remains open. See the
+the user inspected and accepted the viewer milestone. Agent-side browser automation
+was unavailable and is not claimed as completed. See the
 [viewer status and usage](./docs/phase-3-viewer-usage.md).
 Public-release decisions remain open and deferred. See the
 [completion report](./docs/project-completion.md). Contracts and usage:
