@@ -8,4 +8,6 @@ coverage/
 !.env.example
 .DS_Store
 Thumbs.db
-
+.impeccable/review/
+.impeccable/config.local.json
+.impeccable/mocks/

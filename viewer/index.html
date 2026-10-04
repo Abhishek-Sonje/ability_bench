@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AbilityBench · Run inspector</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+<!-- THESIS: Explain recorded decisions through an inspection workbench, not a metrics dashboard.
+OWN-WORLD: Cool white, ink text, blue selection, text-labelled semantic states; ruled evidence tables and unembellished DAG geometry.
+STORY: Choose history, see the immutable baseline, select a stage, understand its reason and compare evidence.
+FIRST VIEWPORT: 220px history rail; run context and three distinct results above the graph; stage inspector at right, stacking below on smaller screens.
+FORM: User-pinned single-screen developer inspector overrides direction seed 57cdaeb7. Selection is immediate; no decorative motion or remote assets.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance -->
+  <header class="app-header"><a class="brand" href="/">AbilityBench</a><span>Run inspector</span><span class="read-only">Read-only · local history</span></header>
+  <div class="shell">
+    <aside class="history"><h1>Run history</h1><p id="workflow" class="muted">Loading verified history…</p><nav id="runs" aria-label="Recorded runs"></nav></aside>
+    <main id="workspace" tabindex="-1">
+      <div id="notice" role="status" aria-live="polite"></div>
+      <section id="empty" class="empty"><h2>Understand a run.</h2><p>Select a recorded run to see its DAG, immutable baseline, and the reasons behind every stage decision.</p><p class="muted">Historical evidence only. No workflow code is loaded and nothing can be executed here.</p></section>
+      <div id="inspection" hidden>
+        <section class="context" aria-label="Selected run"><h2 id="run-title">Candidate run</h2><div id="identities"></div><div id="summaries" class="summaries"></div></section>
+        <details class="evaluation"><summary>Inspect an evaluation receipt</summary><p class="muted">Enter an exact receipt ID from this store. It must match this candidate and its recorded baseline. No receipt selected does not mean never evaluated.</p><form id="receipt-form"><label for="receipt-id">Receipt ID</label><div class="input-row"><input id="receipt-id" name="receipt" placeholder="eval_… (complete ID)" autocomplete="off" required><button type="submit">Inspect receipt</button></div></form><div id="receipt-notice" role="status"></div><div id="receipt"></div></details>
+        <div class="inspection-grid">
+          <section class="workflow-panel"><div class="section-heading"><h2>Historical workflow</h2><span id="stage-count" class="muted"></span></div><p class="muted">Select a stage to explain its recorded decision. Arrows show declared dependencies, not parallel execution.</p><div id="legend" class="legend"><span class="status reused">Reused</span><span class="status succeeded">Executed</span><span class="status failed">Failed</span><span class="status skipped">Skipped</span></div><section id="graph" class="graph" aria-label="Historical dependency graph"></section><details class="dependency-list"><summary>Stage and dependency list</summary><div id="stage-list"></div></details><div id="removed"></div></section>
+          <section id="stage" class="stage-panel" aria-label="Stage inspector"><h2>Stage details</h2><p class="muted">Select a stage in the graph.</p></section>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

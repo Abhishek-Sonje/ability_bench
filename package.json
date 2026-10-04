@@ -21,13 +21,14 @@
     "example:evaluation-regression": "pnpm build && node examples/evaluation-regression/run.mjs",
     "example:composio-research": "pnpm build && node examples/composio-research/demo.mjs",
     "build": "tsc -p tsconfig.build.json",
-    "check": "biome check . && tsc -p tsconfig.build.json && tsc -p tsconfig.json --noEmit && vitest run",
+    "check": "biome check . && tsc -p tsconfig.build.json && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.viewer.json && vitest run",
     "example:release-readiness": "pnpm build && node examples/release-readiness/run.ts",
     "format": "biome format --write .",
     "lint": "biome check .",
     "test": "pnpm build && vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.viewer.json",
+    "viewer": "pnpm build && node dist/viewer-cli.js"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
