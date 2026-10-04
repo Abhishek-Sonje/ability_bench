@@ -421,7 +421,10 @@ function valueTree(value, label, depth = 0, budget = { remaining: 300 }) {
       details.append(
         valueTree(child, Array.isArray(value) ? `Item ${Number(key) + 1}` : key, depth + 1, budget),
       );
-      if (budget.remaining <= 0) break;
+      if (budget.remaining <= 0) {
+        details.append(el("p", "Preview limited to 300 total entries.", "muted"));
+        break;
+      }
     }
     if (items.length > 30)
       details.append(el("p", `Showing 30 of ${items.length} entries.`, "muted"));
