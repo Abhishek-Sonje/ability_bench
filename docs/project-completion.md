@@ -44,8 +44,10 @@ not a blind third-party study.
 
 Before a public release, decide package ownership/name, license, initial version,
    compatibility policy, and support commitments; verify package contents and installation.
-Release work is currently deferred. The next authorized scope is the read-only local
-workflow viewer, with a separate boundary before implementation.
+Release work is currently deferred. The authorized read-only local viewer is now
+implemented on the existing storage boundary, without engine changes or a frontend
+framework. Retained-data checks pass; browser acceptance remains open. See the
+[viewer usage and verification record](./phase-3-viewer-usage.md).
 
 These are verification and product-ownership gates, not missing engine/CLI features.
 macOS remains provisional; network filesystems remain unsupported. The package remains
@@ -53,7 +55,7 @@ private and version `0.0.0`; no publication is implied by technical completion.
 
 ## Deliberate exclusions and known limits
 
-LLMs/providers, UI, SQLite, replay, cost accounting, cloud, numeric scores, evaluator
+LLMs/providers, workflow editing/execution UI, SQLite, replay, cost accounting, cloud, numeric scores, evaluator
 caching, automatic baseline promotion, and garbage collection are not requirements
 of this completed scope. Adding them needs a separate problem statement and contract.
 

@@ -15,6 +15,9 @@ one POSIX-only skip). Windows/Ubuntu CI is verified through `6675717`, including
 the evaluation CLI. The audit was reported as passed by the user.
 The [independent workflow usability gate](./docs/independent-workflow-validation.md)
 is closed after the user-modeled Composio exercise and explicit ordering verification.
+The plain-browser read-only viewer is implemented and its retained-data checks pass;
+browser interaction/visual acceptance remains open. See the
+[viewer status and usage](./docs/phase-3-viewer-usage.md).
 Public-release decisions remain open and deferred. See the
 [completion report](./docs/project-completion.md). Contracts and usage:
 
@@ -29,6 +32,8 @@ Public-release decisions remain open and deferred. See the
 - [Phase 1 local CLI](./docs/phase-1-cli.md)
 - [Evaluation CLI and exit-status contract](./docs/phase-2-cli.md)
 - [Read-only workflow viewer engineering boundary](./docs/phase-3-read-only-viewer.md)
+- [Read-only viewer usage and verification status](./docs/phase-3-viewer-usage.md)
+- [Minimal viewer screen hierarchy](./docs/phase-3-viewer-experience.md)
 - [Phase 1 readiness and external verification](./docs/phase-1-readiness.md)
 - [Phase 2 evaluation contract](./docs/phase-2-evaluation-spec.md)
 - [Phase 2 evaluation progress](./docs/phase-2-progress.md)

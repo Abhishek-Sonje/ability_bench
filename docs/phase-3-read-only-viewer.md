@@ -1,8 +1,11 @@
 # Phase 3: Read-only local workflow viewer
 
-Status: authorized after [usability-gate closure](./independent-workflow-validation.md).
-This document begins the engineering/data boundary only. No viewer implementation,
-frontend stack, visual direction, or extra engine capability is selected by it.
+Status: implemented after [usability-gate closure](./independent-workflow-validation.md),
+using the user-approved existing Node/TypeScript stack and native browser modules.
+This document remains the engineering/data boundary; the
+[screen hierarchy](./phase-3-viewer-experience.md) and
+[usage/acceptance record](./phase-3-viewer-usage.md) describe the implementation.
+Browser acceptance remains open. No extra execution-engine capability is included.
 
 ## Purpose and scope
 
