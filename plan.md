@@ -4,6 +4,9 @@
 > and deterministic evaluation receipts are implemented. The read-only viewer uses the existing
 > Node/TypeScript stack and plain browser modules (not the older Next.js proposal below).
 > Retained-data checks pass; the user accepted the viewer milestone. See `docs/phase-3-viewer-usage.md`.
+> The small live Gemini validation is implemented as an isolated snapshot adapter; its first
+> generation request returned HTTP 503. No live savings result is claimed. See
+> `docs/live-gemini-validation.md`. No new engine features or UI work are authorized by this test.
 > The normative execution
 > contract is in `execution-contract.md`, verification and assessment are under `docs/`, and
 > Phase 1 currently means the narrow local CLI specified in `docs/phase-1-cli.md`. Those documents

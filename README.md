@@ -35,6 +35,7 @@ Public-release decisions remain open and deferred. See the
 - [Read-only workflow viewer engineering boundary](./docs/phase-3-read-only-viewer.md)
 - [Read-only viewer usage and verification status](./docs/phase-3-viewer-usage.md)
 - [Minimal viewer screen hierarchy](./docs/phase-3-viewer-experience.md)
+- [Budgeted live Gemini experiment and actual attempt status](./docs/live-gemini-validation.md)
 - [Phase 1 readiness and external verification](./docs/phase-1-readiness.md)
 - [Phase 2 evaluation contract](./docs/phase-2-evaluation-spec.md)
 - [Phase 2 evaluation progress](./docs/phase-2-progress.md)
