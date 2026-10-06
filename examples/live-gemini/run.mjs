@@ -16,6 +16,7 @@ import {
   GRAPH,
   outputFromSnapshot,
   PRICING,
+  providerFailure,
   requestBody,
   SETTINGS,
   usageFromResponse,
@@ -97,10 +98,10 @@ async function generate(stageId, body, scenario) {
         signal: AbortSignal.timeout(Math.ceil(timeout)),
       },
     );
-    if (!response.ok)
-      throw new Error(
-        `Gemini HTTP ${response.status}; request stopped without retry. Provider diagnostic body is deliberately not logged.`,
-      );
+    if (!response.ok) {
+      const diagnostic = await response.json().catch(() => null);
+      throw new Error(providerFailure(response.status, diagnostic, apiKey));
+    }
     const value = await response.json();
     const usage = usageFromResponse(value);
     entry.usage = usage;

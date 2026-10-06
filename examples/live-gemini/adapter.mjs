@@ -26,6 +26,26 @@ export const GRAPH = Object.freeze([
 export function digest(value) {
   return `sha256:${createHash("sha256").update(canonicalizeJson(value)).digest("hex")}`;
 }
+/** Only retain bounded public error fields, never provider details or credentials. */
+export function providerFailure(httpStatus, value, apiKey) {
+  const error = value?.error;
+  const status =
+    typeof error?.status === "string" && /^[A-Z_]{1,64}$/.test(error.status)
+      ? error.status
+      : "UNKNOWN";
+  let message = typeof error?.message === "string" ? error.message : "No diagnostic message.";
+  if (apiKey) message = message.split(apiKey).join("[redacted]");
+  message = message
+    .replace(/AIza[\w-]+/g, "[redacted]")
+    .replace(/https?:\/\/\S+/g, "[redacted URL]")
+    .split("")
+    .map((character) =>
+      character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127 ? " " : character,
+    )
+    .join("")
+    .slice(0, 600);
+  return `Gemini HTTP ${httpStatus} (${status}): ${message} Request stopped without retry.`;
+}
 export function requestBody(prompt, dependencies) {
   return {
     contents: [

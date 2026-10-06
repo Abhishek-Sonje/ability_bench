@@ -27,7 +27,11 @@ describe("live Gemini adapter offline guardrails", () => {
     const adapter = pathToFileURL(join(root, "adapter.mjs")).href;
     const source = `
       import assert from 'node:assert/strict';
-      import { Budget, digest, outputFromSnapshot, requestBody, SETTINGS, usageFromResponse } from ${JSON.stringify(adapter)};
+      import { Budget, digest, outputFromSnapshot, providerFailure, requestBody, SETTINGS, usageFromResponse } from ${JSON.stringify(adapter)};
+      assert.match(providerFailure(503, { error: { status: 'UNAVAILABLE', message: 'Service overloaded.' } }, 'secret'), /HTTP 503 \\(UNAVAILABLE\\): Service overloaded/);
+      const safe = providerFailure(403, { error: { status: 'PERMISSION_DENIED', message: 'secret https://example.com/?key=secret', details: [{ key: 'secret' }] } }, 'secret');
+      assert.ok(!safe.includes('secret')); assert.ok(!safe.includes('example.com'));
+      assert.ok(providerFailure(503, null, 'secret').includes('UNKNOWN'));
       const body = requestBody('short prompt', { source: { text: 'synthetic' } });
       const snapshot = { requestHash: digest({ model: SETTINGS.model, body }), text: 'captured answer', modelVersion: 'test-version' };
       assert.equal(outputFromSnapshot(snapshot, body).text, 'captured answer');

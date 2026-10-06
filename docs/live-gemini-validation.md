@@ -2,7 +2,7 @@
 
 ## Status
 
-Live validation remains incomplete: generation returned HTTP 503 before a baseline could finish. No measured token/cost savings are claimed. Model metadata lookup succeeded with the same key; a key problem was not demonstrated. Provider usage for failed requests is unknown, not zero.
+Live validation remains incomplete: generation returned HTTP 503 before a baseline could finish. The sanitized provider diagnostic identifies `UNAVAILABLE` due to high model demand, not an authentication or billing error. No measured token/cost savings are claimed. Model metadata lookup succeeded with the same key; a key problem was not demonstrated. Provider usage for failed requests is unknown, not zero.
 
 Individual request logs and budget reservations stay in ignored local evidence under examples/live-gemini/.abilitybench/. They are not tracked as per-call reports. Explicit retries carry prior reservations forward under the shared $0.10 estimated ceiling; no automatic retries or model substitutions are enabled.
 
