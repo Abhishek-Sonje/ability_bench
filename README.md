@@ -1,54 +1,96 @@
 # AbilityBench
 
-AbilityBench is an experimental local-first execution engine for dependency-aware incremental
-workflow runs.
+**Dependency-aware workflow execution with explainable reuse.**
 
-The implemented scope is deliberately narrow: a fully declared DAG, conservative
-reuse from one immutable baseline, a local execution/evaluation CLI, and deterministic SDK
-evaluation with separately verified immutable receipts.
+AbilityBench is a local-first TypeScript execution engine that helps developers understand what needs to run again when a workflow changes. Declare a complete dependency graph, capture an immutable baseline, and execute a candidate that reuses valid outputs while conservatively rerunning affected stages.
 
-## Status
+Every reuse, execution, failure, and skip has a recorded explanation. A local CLI and read-only browser viewer make those decisions inspectable without changing execution history.
 
-The developer-local technical scope is complete, including the evaluation CLI.
-Implementation commit `0692ca3` passed the local Windows quality gate (187 active tests,
-one POSIX-only skip). Windows/Ubuntu CI is verified through `6675717`, including
-the evaluation CLI. The audit was reported as passed by the user.
-The [independent workflow usability gate](./docs/independent-workflow-validation.md)
-is closed after the user-modeled Composio exercise and explicit ordering verification.
-The plain-browser read-only viewer is implemented and its retained-data checks pass;
-the user inspected and accepted the viewer milestone. Agent-side browser automation
-was unavailable and is not claimed as completed. See the
-[viewer status and usage](./docs/phase-3-viewer-usage.md).
-Public-release decisions remain open and deferred. See the
-[completion report](./docs/project-completion.md). Contracts and usage:
+> Status: working developer-local prototype. The execution engine, evaluation CLI, and read-only viewer are implemented. The package is not published or production-ready. Live Gemini savings validation remains incomplete; no measured AI cost savings are claimed.
 
-- [Product plan](./plan.md)
-- [Phase 0 execution contract](./execution-contract.md)
-- [Phase 0 storage guarantees](./docs/phase-0-storage.md)
-- [Phase 0 usage](./docs/phase-0-usage.md)
-- [Phase 0 verification and remaining gates](./docs/phase-0-verification.md)
-- [Phase 0 assessment and go/no-go result](./docs/phase-0-assessment.md)
-- [Platform support](./docs/platform-support.md)
-- [Release-readiness example](./examples/release-readiness/README.md)
-- [Phase 1 local CLI](./docs/phase-1-cli.md)
-- [Evaluation CLI and exit-status contract](./docs/phase-2-cli.md)
-- [Read-only workflow viewer engineering boundary](./docs/phase-3-read-only-viewer.md)
-- [Read-only viewer usage and verification status](./docs/phase-3-viewer-usage.md)
-- [Minimal viewer screen hierarchy](./docs/phase-3-viewer-experience.md)
-- [Budgeted live Gemini experiment and actual attempt status](./docs/live-gemini-validation.md)
-- [Phase 1 readiness and external verification](./docs/phase-1-readiness.md)
-- [Phase 2 evaluation contract](./docs/phase-2-evaluation-spec.md)
-- [Phase 2 evaluation progress](./docs/phase-2-progress.md)
-- [Phase 2 immutable receipt storage](./docs/phase-2-storage.md)
-- [Evaluation regression walkthrough](./examples/evaluation-regression/README.md)
-- [Phase 2 assessment](./docs/phase-2-assessment.md)
+## Why it exists
 
-AbilityBench is not ready for production use.
+Changing one step in a multi-stage workflow should not automatically require rerunning everything. But reuse is only useful if developers can trust it: hidden inputs, side effects, and unclear cache decisions can make a fast workflow incorrect.
 
-## Phase 0 API
+AbilityBench makes that trade-off explicit:
 
-Declare every stage before running the workflow. Stage callbacks receive only their declared
-direct dependencies and selected external inputs.
+- Declare dependencies and external influences before execution.
+- Compare each candidate against one explicitly chosen immutable baseline.
+- Reuse only when the declared contract and verified artifacts permit it.
+- Explain why every stage reused, ran, failed, or was skipped.
+- Evaluate output quality separately from execution success.
+
+The longer-term motivation is cheaper iteration on agent workflows. The current engine establishes the deterministic execution foundation; arbitrary live LLM callbacks do not satisfy its purity contract.
+
+## Example: change one branch, not the whole workflow
+
+The included release-readiness example has independent branches and a join:
+
+```text
+inventory ----> unit-tests ----+
+    |                         |
+    +---------> security -----+----> summary ----> report
+                              |
+documentation ----------------+
+```
+
+When only the declared security signal changes:
+
+| Stage | Candidate decision | Reason |
+| --- | --- | --- |
+| inventory | Reuse | Declared fingerprint and baseline artifact remain valid |
+| unit-tests | Reuse | Its inputs and dependency are unchanged |
+| documentation | Reuse | Independent branch is unchanged |
+| security | Execute | Its selected input changed |
+| summary | Execute | A direct dependency executed |
+| report | Execute | A direct dependency executed |
+
+Invalidation is intentionally conservative: descendants rerun when a dependency executes, even if it produces identical output bytes. AbilityBench prioritizes explainable correctness over maximum cache hits.
+
+## Implemented capabilities
+
+| Capability | Behavior |
+| --- | --- |
+| Declared DAG | Validates stage identities, dependencies, and cycles before execution; plans topologically |
+| Typed SDK | Infers dependency outputs and validates selected external inputs at runtime |
+| Explicit cache contract | Groups revision, watched files, and environment dependencies; supports disabled and volatile caching |
+| Deterministic fingerprints | Canonical serialization and SHA-256 identities track declared influences |
+| Immutable local history | Content-addressed manifests and artifacts; each candidate names one baseline |
+| Explainable execution | Records reuse/rerun reasons and distinguishes dependency skips from fail-fast skips |
+| Independent evaluation | Stores separate immutable receipts for evaluation and regression outcomes |
+| Local inspection | CLI planning, inspection, comparison, and history listing |
+| Read-only viewer | Historical DAG, recorded baseline, stage explanations, fingerprint comparisons, and bounded artifact previews |
+
+## Quick start
+
+The repository pins Node.js `>=24.20.0 <25` and pnpm `12.5.1`. See [package.json](./package.json).
+
+```bash
+corepack enable
+pnpm install
+pnpm build
+```
+
+Run the included deterministic example without API credentials:
+
+```bash
+node dist/cli.js run --config examples/release-readiness/abilitybench.config.ts --inputs examples/release-readiness/inputs.json
+```
+
+Copy the printed run ID. Replace `BASELINE_RUN_ID` below with that exact ID to preview and execute a candidate:
+
+```bash
+node dist/cli.js plan --config examples/release-readiness/abilitybench.config.ts --inputs examples/release-readiness/inputs.json --baseline BASELINE_RUN_ID
+node dist/cli.js run --config examples/release-readiness/abilitybench.config.ts --inputs examples/release-readiness/inputs.json --baseline BASELINE_RUN_ID
+```
+
+With unchanged inputs, all stages reuse. `plan` predicts decisions without executing stages or persisting a candidate; `run` plans again against current inputs. AbilityBench never silently chooses a "latest" baseline.
+
+See the [example walkthrough](./examples/release-readiness/README.md) for the equivalent SDK flow.
+
+## Public SDK
+
+Define typed stage handles first, then compose the complete workflow. Defining a stage does not execute it.
 
 ```ts
 import { cache, createWorkflow, defineStage, input, runWorkflow } from "abilitybench";
@@ -65,10 +107,22 @@ const source = defineStage({
   run: ({ inputs }) => ({ value: inputs.value }),
 });
 
+const report = defineStage({
+  id: "report",
+  dependsOn: [source],
+  inputs: {},
+  cache: cache.enabled({
+    revision: "report-v1",
+    files: ["./workflow.ts"],
+    environment: [],
+  }),
+  run: ({ dependencies }) => ({ doubled: dependencies.source.value * 2 }),
+});
+
 const workflow = createWorkflow({
   id: "example",
   root: import.meta.dirname,
-  stages: [source],
+  stages: [source, report],
 });
 
 const baseline = await runWorkflow(workflow, {
@@ -80,96 +134,90 @@ const candidate = await runWorkflow(workflow, {
   inputs: { value: 42 },
   baseline: { runId: baseline.manifest.id },
 });
+
+console.log(candidate.plan.decisions);
 ```
 
-The caller chooses one baseline explicitly. Each run is stored under the workflow root in
-`.abilitybench/` by default. `candidate.plan.decisions` explains every reuse or execution.
+This example assumes a file named `workflow.ts`, because that file is explicitly watched. Importing `abilitybench` works inside this repository through its package exports; external installation is not yet published.
 
-Cacheable stages must behave as pure functions of their declared dependencies, selected inputs,
-environment variables, and watched files. AbilityBench cannot detect an undeclared influence.
-Typed input contracts are fingerprinted, and the grouped cache declaration makes each influence
-category visible at the stage boundary.
+Cacheable stages must behave as pure functions of their declared dependency outputs, selected inputs, environment variables, and watched files. Outputs must satisfy the supported strict JSON artifact contract. Undeclared clock, randomness, network, or filesystem reads cannot be detected automatically. Side-effecting work should not be treated as cacheable.
 
-## Local CLI
+## Inspect runs in the browser
 
-After building, run a workflow with an explicit input file:
+After running the quick-start example:
 
 ```bash
-pnpm build
-node dist/cli.js run --config ./abilitybench.config.ts --inputs ./inputs.json
+pnpm viewer --store examples/release-readiness/.abilitybench --workflow release-readiness
 ```
 
-Pass `--baseline run_<digest>` to reuse from exactly that immutable run. Use `--invalidate
-<stage>` one or more times for manual invalidation, or `--json` for versioned machine output.
-The CLI never chooses a “latest” baseline implicitly.
+Open `http://127.0.0.1:4310`. Select a run to see its recorded baseline and historical DAG, then click a stage for its decision, dependencies, fingerprint differences, and available artifact information.
 
-Preview the same conservative decisions without executing or persisting a candidate:
+The viewer does not execute workflows or edit history. Keep it on loopback; remote hosting is outside its security boundary. See the [viewer guide](./docs/phase-3-viewer-usage.md).
+
+For CLI inspection, replace the run-ID placeholders with exact immutable IDs:
 
 ```bash
-node dist/cli.js plan --config ./abilitybench.config.ts --inputs ./inputs.json --baseline run_<digest>
+node dist/cli.js runs --config examples/release-readiness/abilitybench.config.ts --limit 20
+node dist/cli.js inspect RUN_ID --config examples/release-readiness/abilitybench.config.ts
+node dist/cli.js diff BASELINE_RUN_ID CANDIDATE_RUN_ID --config examples/release-readiness/abilitybench.config.ts
 ```
 
-Plans are predictive snapshots. A later `run` always plans again against then-current inputs,
-environment values, files, and artifacts.
+Use `--json` for versioned machine output or `--invalidate STAGE_ID` on a run for explicit manual invalidation. See the [CLI guide](./docs/phase-1-cli.md) for configuration conventions and complete options.
 
-Inspect one stored run by its exact immutable ID:
+## Execution is not evaluation
 
-```bash
-node dist/cli.js inspect run_<digest> --config ./abilitybench.config.ts
+A completed run can still fail a quality check. A failed absolute quality check does not automatically mean regression against a baseline.
+
+AbilityBench keeps execution history separate from immutable evaluation receipts. Evaluation runs checks fresh against an explicitly selected pair of completed runs, without rewriting their manifests. The [evaluation walkthrough](./examples/evaluation-regression/README.md) demonstrates passing, failing, and regressing outcomes.
+
+## Architecture and engineering decisions
+
+```text
+Workflow declarations + explicit inputs + immutable baseline
+                            |
+                 Validate and fingerprint
+                            |
+                   Plan reuse / execution
+                            |
+               Execute with explicit dependencies
+                            |
+             Immutable manifests + output artifacts
+                      /                 \
+             CLI / read-only viewer   Evaluation receipts
 ```
 
-Inspection verifies the stored manifest's canonical bytes and content identity before printing it.
+- **Explicit baseline lineage:** reproducible comparisons instead of a global "last run" cache.
+- **Conservative invalidation:** rerun affected descendants rather than infer semantic equivalence from equal bytes.
+- **Separated evaluation:** quality judgments do not mutate the execution record.
+- **Filesystem storage:** inspectable local artifacts without a database or cloud service.
+- **Small dependency surface:** Node.js/TypeScript engine and a plain-browser viewer, with no frontend framework or runtime package dependencies.
 
-Compare two explicitly selected immutable runs:
+## Verification and current boundaries
 
-```bash
-node dist/cli.js diff run_<old-digest> run_<new-digest> --config ./abilitybench.config.ts
-```
+The latest recorded full local Windows quality gate passed **198 tests**, with one existing POSIX-only skip. CI is configured for Windows and Ubuntu; previously confirmed cross-platform CI covers the engine and evaluation CLI, not a newly claimed validation of every later milestone.
 
-The diff reports graph additions and removals plus every persisted field changed for shared stages.
+The independent usability exercise used a real Composio project not designed around AbilityBench. Its workflow-modeling, decision explanations, side-effect handling, and ordering checks passed. The read-only viewer was checked against retained histories and accepted by the user. See the [independent validation](./docs/independent-workflow-validation.md) and [viewer verification](./docs/phase-3-viewer-usage.md).
 
-List recent verified runs without implicitly selecting a baseline:
+The small live Gemini experiment remains unfinished due to provider `503 UNAVAILABLE` responses. Its adapter captures immutable provider responses outside deterministic engine callbacks; it is not native caching of stochastic LLM execution. No real token, latency, or cost savings are claimed. See the [live validation status](./docs/live-gemini-validation.md).
 
-```bash
-node dist/cli.js runs --config ./abilitybench.config.ts --limit 20
-```
-
-Listing is bounded and deterministic. Any baseline passed to `run` must still be named explicitly.
-
-Every subcommand accepts only its documented options. With `--json`, command failures emit a
-versioned `phase1-cli-error-v1` document on stderr instead of human-formatted text.
+Not included: workflow editing, drag-and-drop, authentication, cloud execution, SQLite, tool replay, or production deployment. Publication and release work are deferred.
 
 ## Development
 
-Evaluate two explicitly selected completed runs with the optional `evaluation` module
-configured in `abilitybench.config.ts`:
-
 ```bash
-node dist/cli.js evaluate run_<baseline> run_<candidate> --criteria ./criteria.json --json
-node dist/cli.js evaluation eval_<digest> --json
+pnpm check       # Formatting/lint checks, TypeScript checks, and tests
+pnpm test        # Build and run tests
+pnpm build       # Build the SDK and CLI
 ```
 
-Evaluation writes a separate immutable receipt, never modifies execution history, and
-always invokes checks fresh. Exit codes are 0 for passing/no-regression, 1 for policy
-failure, 2 for command failure, and 3 for evaluator errors. Exact verified inspection
-exits 0 regardless of the historical verdict and does not load evaluator code.
-See the [runnable walkthrough](./examples/evaluation-regression/README.md).
+Repository conventions and quality gates are in [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-For an offline branch-and-join demo using saved research from a sibling Composio
-project, see [the Composio research example](./examples/composio-research/README.md).
+## Documentation
 
-Requirements:
-
-- Node.js 24.20.0 or newer within the Node 24 release line
-- Corepack with pnpm 12.5.1
-
-```bash
-corepack enable
-pnpm install
-pnpm check
-```
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for repository conventions and quality gates.
-
-The same `pnpm check` gate runs in CI on both Ubuntu and Windows so filesystem behavior is covered
-on POSIX and Windows hosts.
+- [Product plan](./plan.md) and [execution contract](./execution-contract.md)
+- [SDK usage](./docs/phase-0-usage.md) and [storage guarantees](./docs/phase-0-storage.md)
+- [Execution CLI](./docs/phase-1-cli.md) and [evaluation CLI](./docs/phase-2-cli.md)
+- [Evaluation contract](./docs/phase-2-evaluation-spec.md) and [receipt storage](./docs/phase-2-storage.md)
+- [Read-only viewer usage](./docs/phase-3-viewer-usage.md) and [engineering boundary](./docs/phase-3-read-only-viewer.md)
+- [Offline Composio research demo](./examples/composio-research/README.md)
+- [Platform support](./docs/platform-support.md) and [completion report](./docs/project-completion.md)
