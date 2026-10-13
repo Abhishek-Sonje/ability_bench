@@ -135,7 +135,7 @@ export function usageFromResponse(response, pricing = PRICING) {
   };
 }
 
-export const BUDGET_CAP_USD = 0.1;
+export const BUDGET_CAP_USD = 0.11;
 export const PROTOCOL_CALLS = 12;
 export function requestReservation(settings = SETTINGS, pricing = PRICING) {
   if (

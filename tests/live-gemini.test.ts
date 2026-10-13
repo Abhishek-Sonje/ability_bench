@@ -10,13 +10,16 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-async function fixture(fastRetries = false) {
+// Preserve regression coverage of the original $0.10 guard alongside the approved cap.
+async function fixture(fastRetries = false, capUsd = 0.1) {
   const root = await mkdtemp(join(tmpdir(), "abilitybench-gemini-offline-"));
   roots.push(root);
   const sdk = pathToFileURL(resolve("dist/index.js")).href;
   for (const name of ["adapter.mjs", "run.mjs"]) {
     const source = await readFile(resolve("examples/live-gemini", name), "utf8");
-    const imported = source.replace('"../../dist/index.js"', JSON.stringify(sdk));
+    const imported = source
+      .replace('"../../dist/index.js"', JSON.stringify(sdk))
+      .replace("export const BUDGET_CAP_USD = 0.11;", `export const BUDGET_CAP_USD = ${capUsd};`);
     await writeFile(
       join(root, name),
       fastRetries && name === "run.mjs"
@@ -28,6 +31,26 @@ async function fixture(fastRetries = false) {
 }
 
 describe("live Gemini adapter offline guardrails", () => {
+  it("uses the approved $0.11 default without removing reservation or protocol guards", async () => {
+    const root = await fixture(false, 0.11);
+    const adapter = pathToFileURL(join(root, "adapter.mjs")).href;
+    await writeFile(
+      join(root, "approved-cap.mjs"),
+      `
+      import assert from 'node:assert/strict';import {Budget,BUDGET_CAP_USD,requestReservation} from ${JSON.stringify(adapter)};
+      assert.equal(BUDGET_CAP_USD,.11);
+      const budget=new Budget(.02314875);budget.preflight();
+      budget.reserve({});assert.throws(()=>budget.preflight(),/Complete validation/);
+      const spent=new Budget(.109);assert.throws(()=>spent.reserve({}),/reservation/);assert.equal(spent.attempts,0);
+      assert.ok(.02314875+12*requestReservation()<.11);
+    `,
+    );
+    const result = spawnSync(process.execPath, [join(root, "approved-cap.mjs")], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    expect(result.status, result.stderr).toBe(0);
+  });
   it("bounds exponential delays and honors seconds/date Retry-After without retrying early", async () => {
     const root = await fixture();
     const adapter = pathToFileURL(join(root, "adapter.mjs")).href;
