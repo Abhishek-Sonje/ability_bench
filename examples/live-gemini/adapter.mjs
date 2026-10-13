@@ -12,7 +12,7 @@ export const PRICING = Object.freeze({
   inputPerMillion: 0.75,
   cachedInputPerMillion: 0.075,
   outputPerMillion: 3.75,
-  checkedAt: "2026-10-04",
+  checkedAt: "2026-10-13",
   source: "https://ai.google.dev/gemini-api/docs/pricing",
 });
 export const GRAPH = Object.freeze([
@@ -76,7 +76,7 @@ export function outputFromSnapshot(snapshot, body) {
     modelVersion: snapshot.modelVersion,
   };
 }
-export function usageFromResponse(response) {
+export function usageFromResponse(response, pricing = PRICING) {
   const usage = response.usageMetadata;
   if (
     !usage ||
@@ -98,9 +98,9 @@ export function usageFromResponse(response) {
   )
     throw new Error("Provider token accounting is inconsistent.");
   const estimatedCostUsd =
-    ((input - cached) * PRICING.inputPerMillion +
-      cached * PRICING.cachedInputPerMillion +
-      (output + thinking) * PRICING.outputPerMillion) /
+    ((input - cached) * pricing.inputPerMillion +
+      cached * pricing.cachedInputPerMillion +
+      (output + thinking) * pricing.outputPerMillion) /
     1_000_000;
   return {
     inputTokens: input,
@@ -112,10 +112,66 @@ export function usageFromResponse(response) {
   };
 }
 
+export const BUDGET_CAP_USD = 0.1;
+export const PROTOCOL_CALLS = 12;
+export function requestReservation(settings = SETTINGS, pricing = PRICING) {
+  if (
+    !Number.isSafeInteger(settings.maxOutputTokens) ||
+    settings.maxOutputTokens <= 0 ||
+    ![pricing.inputPerMillion, pricing.cachedInputPerMillion, pricing.outputPerMillion].every(
+      (value) => Number.isFinite(value) && value >= 0,
+    )
+  )
+    throw new Error("Invalid retained reservation settings/pricing.");
+  return (
+    (4096 * pricing.inputPerMillion + settings.maxOutputTokens * pricing.outputPerMillion) /
+    1_000_000
+  );
+}
+
+/** Recompute exposure from original per-attempt evidence, not cumulative ledger totals. */
+export function retainedExposure(previous) {
+  if (!Array.isArray(previous.ledger) || previous.budget?.attempts !== previous.ledger.length)
+    throw new Error("Invalid retained attempt ledger; budget reconciliation stopped.");
+  const worst = requestReservation(previous.settings, previous.pricing);
+  return previous.ledger.reduce((total, entry) => {
+    if (!["dispatched", "completed", "failed"].includes(entry.status))
+      throw new Error("Invalid retained request status.");
+    if (entry.usage === null) return total + worst;
+    const usage = entry.usage;
+    if (!usage || !Number.isSafeInteger(usage.thinkingTokens))
+      throw new Error("Invalid retained usage.");
+    const verified = usageFromResponse(
+      {
+        usageMetadata: {
+          promptTokenCount: usage.inputTokens,
+          candidatesTokenCount: usage.outputTokens,
+          thoughtsTokenCount: usage.thinkingTokens,
+          cachedContentTokenCount: usage.cachedInputTokens,
+          totalTokenCount: usage.totalTokens,
+        },
+      },
+      previous.pricing,
+    );
+    if (
+      !Number.isFinite(usage.estimatedCostUsd) ||
+      Math.abs(usage.estimatedCostUsd - verified.estimatedCostUsd) > 1e-12 ||
+      usage.inputTokens > 4096 ||
+      usage.outputTokens + usage.thinkingTokens > previous.settings.maxOutputTokens
+    )
+      throw new Error("Retained usage violates reservation assumptions; reconciliation stopped.");
+    return total + verified.estimatedCostUsd;
+  }, 0);
+}
+
 /** Hard attempt/output/time limits plus conservative client-side spend reservations. */
 export class Budget {
   constructor(priorReservedUsd = 0) {
-    if (!Number.isFinite(priorReservedUsd) || priorReservedUsd < 0 || priorReservedUsd > 0.1)
+    if (
+      !Number.isFinite(priorReservedUsd) ||
+      priorReservedUsd < 0 ||
+      priorReservedUsd > BUDGET_CAP_USD
+    )
       throw new Error("Invalid prior experiment reservation.");
     this.started = performance.now();
     this.attempts = 0;
@@ -123,34 +179,62 @@ export class Budget {
     this.reservedUsd = priorReservedUsd;
     this.measuredUsd = 0;
     this.unknownUsage = false;
+    this.reservations = [];
+    this.grossReservedUsd = 0;
+  }
+  preflight(attempts = PROTOCOL_CALLS) {
+    if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > PROTOCOL_CALLS)
+      throw new Error("Invalid protocol attempt count.");
+    if (this.reservedUsd + attempts * requestReservation() > BUDGET_CAP_USD)
+      throw new Error(
+        "Complete validation cannot fit the $0.10 worst-case reservation cap; no requests dispatched.",
+      );
   }
   reserve(body) {
     if (this.unknownUsage)
       throw new Error("An earlier request has unknown usage; no further requests allowed.");
-    if (this.attempts >= 12) throw new Error("12-request experiment limit reached.");
+    if (this.attempts >= PROTOCOL_CALLS) throw new Error("12-request experiment limit reached.");
     if (Buffer.byteLength(JSON.stringify(body), "utf8") > 2048)
       throw new Error("Request exceeds the 2,048-byte prompt envelope limit.");
     const remainingMs = 300_000 - (performance.now() - this.started);
     if (remainingMs <= 0) throw new Error("Five-minute experiment limit reached.");
-    const worst =
-      (4096 * PRICING.inputPerMillion + SETTINGS.maxOutputTokens * PRICING.outputPerMillion) /
-      1_000_000;
-    if (this.reservedUsd + worst > 0.1)
+    const worst = requestReservation();
+    if (this.reservedUsd + worst > BUDGET_CAP_USD)
       throw new Error("Estimated $0.10 reservation limit reached.");
     this.reservedUsd += worst;
+    this.grossReservedUsd += worst;
     this.attempts++;
+    this.reservations.push({ id: this.attempts, amountUsd: worst, settled: false });
     return Math.min(45_000, remainingMs);
   }
-  record(usage) {
-    this.measuredUsd += usage.estimatedCostUsd;
+  record(usage, reservationId = this.attempts) {
+    const reservation = this.reservations.find((item) => item.id === reservationId);
+    if (!reservation || reservation.settled)
+      throw new Error("Usage requires one unsettled request reservation.");
+    const verified = usageFromResponse({
+      usageMetadata: {
+        promptTokenCount: usage.inputTokens,
+        candidatesTokenCount: usage.outputTokens,
+        thoughtsTokenCount: usage.thinkingTokens,
+        cachedContentTokenCount: usage.cachedInputTokens,
+        totalTokenCount: usage.totalTokens,
+      },
+    });
     if (
-      this.priorReservedUsd + this.measuredUsd > 0.1 ||
+      !Number.isFinite(usage.estimatedCostUsd) ||
+      usage.estimatedCostUsd < 0 ||
+      Math.abs(usage.estimatedCostUsd - verified.estimatedCostUsd) > 1e-12 ||
+      usage.estimatedCostUsd > reservation.amountUsd ||
       usage.inputTokens > 4096 ||
       usage.outputTokens + usage.thinkingTokens > SETTINGS.maxOutputTokens
     ) {
       this.unknownUsage = true;
       throw new Error("Measured usage exceeded the experiment reservation assumptions; stop.");
     }
+    this.measuredUsd += usage.estimatedCostUsd;
+    this.reservedUsd = this.reservedUsd - reservation.amountUsd + usage.estimatedCostUsd;
+    reservation.settled = true;
+    reservation.actualCostUsd = usage.estimatedCostUsd;
   }
 }
 

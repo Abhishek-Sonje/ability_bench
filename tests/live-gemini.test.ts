@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -22,6 +22,101 @@ async function fixture() {
 }
 
 describe("live Gemini adapter offline guardrails", () => {
+  it("releases known reservations, preserves unknown exposure, and fails closed on invalid history", async () => {
+    const root = await fixture();
+    const adapter = pathToFileURL(join(root, "adapter.mjs")).href;
+    await writeFile(
+      join(root, "accounting.mjs"),
+      `
+      import assert from 'node:assert/strict';
+      import {Budget, PRICING, SETTINGS, retainedExposure, requestReservation, usageFromResponse} from ${JSON.stringify(adapter)};
+      const worst=requestReservation();
+      const usage=usageFromResponse({usageMetadata:{promptTokenCount:92,candidatesTokenCount:37,thoughtsTokenCount:588,totalTokenCount:717}});
+      const b=new Budget(.006912); b.reserve({}); b.record(usage);
+      assert.ok(Math.abs(b.reservedUsd-(.006912+.00241275))<1e-12);
+      assert.ok(Math.abs(b.grossReservedUsd-worst)<1e-12);
+      assert.throws(()=>b.record(usage), /unsettled/);
+      b.reserve({}); b.unknownUsage=true;
+      assert.ok(Math.abs(b.reservedUsd-(.006912+.00241275+worst))<1e-12);
+      assert.throws(()=>b.reserve({}), /unknown usage/);
+      const old={settings:SETTINGS,pricing:PRICING,budget:{attempts:2,priorReservedUsd:.013824,reservedUsd:.027648},ledger:[{status:'completed',usage},{status:'failed',usage:null}]};
+      assert.ok(Math.abs(retainedExposure(old)-(.00241275+worst))<1e-12);
+      assert.equal(retainedExposure({...old,budget:{attempts:1},ledger:[{status:'dispatched',usage:null}]}),worst);
+      assert.equal(retainedExposure({...old,budget:{attempts:1},ledger:[{status:'failed',usage}]}),usage.estimatedCostUsd);
+      assert.throws(()=>retainedExposure({...old,budget:{attempts:3}}), /ledger/);
+      assert.throws(()=>retainedExposure({...old,ledger:[{status:'completed',usage:{...usage,estimatedCostUsd:0}},{status:'failed',usage:null}]}), /violates/);
+      const prior=.00241275+3*worst;
+      const guarded=new Budget(prior); assert.throws(()=>guarded.preflight(), /Complete validation/); assert.equal(guarded.attempts,0);
+      const exhausted=new Budget(.099); assert.throws(()=>exhausted.reserve({}), /reservation/); assert.equal(exhausted.attempts,0);
+      const within=new Budget(.01); within.preflight();
+      for(let i=0;i<12;i++){within.reserve({});within.record(usage);assert.ok(within.reservedUsd<=.1);}
+      assert.throws(()=>within.reserve({}), /12-request/);
+    `,
+    );
+    const result = spawnSync(process.execPath, [join(root, "accounting.mjs")], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it("accounts explicit retry attempts cumulatively and rejects a retry before fetch when the cap cannot fit", async () => {
+    const root = await fixture();
+    await writeFile(
+      join(root, "retry.mjs"),
+      `
+      process.env.GEMINI_API_KEY='offline-key'; let calls=0;
+      globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({error:{status:'UNAVAILABLE',message:'High demand.'}}),{status:503});};
+      try { await import('./run.mjs'); } catch(error) { console.error(error.message); process.exitCode=1; }
+      console.log('fetch-count='+calls);
+    `,
+    );
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      const result = spawnSync(process.execPath, [join(root, "retry.mjs")], {
+        encoding: "utf8",
+        timeout: 10_000,
+      });
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain(`fetch-count=${attempt <= 3 ? 1 : 0}`);
+      if (attempt === 4) expect(result.stderr).toContain("Complete validation cannot fit");
+    }
+    const names = (await readdir(join(root, ".abilitybench"))).filter((name) =>
+      name.startsWith("experiment-"),
+    );
+    expect(names).toHaveLength(3);
+    const ledgers = await Promise.all(
+      names.map(async (name) =>
+        JSON.parse(await readFile(join(root, ".abilitybench", name, "usage-ledger.json"), "utf8")),
+      ),
+    );
+    expect(
+      ledgers.map((value) => value.budget.priorReservedUsd).sort((a: number, b: number) => a - b),
+    ).toEqual([0, 0.006912, 0.013824]);
+    expect(
+      ledgers.every(
+        (value) => value.ledger[0].httpStatus === 503 && value.ledger[0].usage === null,
+      ),
+    ).toBe(true);
+    expect(await readdir(join(root, ".abilitybench"))).not.toContain("budget.lock");
+  });
+
+  it("does not dispatch while another invocation holds the cumulative-budget lock", async () => {
+    const root = await fixture();
+    await mkdir(join(root, ".abilitybench"));
+    await writeFile(join(root, ".abilitybench", "budget.lock"), "");
+    await writeFile(
+      join(root, "locked.mjs"),
+      `process.env.GEMINI_API_KEY='offline-key';globalThis.fetch=()=>{throw new Error('must not dispatch');};await import('./run.mjs');`,
+    );
+    const result = spawnSync(process.execPath, [join(root, "locked.mjs")], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("EEXIST");
+    expect(await readdir(join(root, ".abilitybench"))).toEqual(["budget.lock"]);
+  });
+
   it("checks canonical request binding, usage math, spend reservation, attempts, and time", async () => {
     const root = await fixture();
     const adapter = pathToFileURL(join(root, "adapter.mjs")).href;
@@ -49,7 +144,7 @@ describe("live Gemini adapter offline guardrails", () => {
       const spent = new Budget(); spent.reservedUsd = .099; assert.throws(() => spent.reserve(body), /reservation/);
       const carried = new Budget(.099); assert.equal(carried.priorReservedUsd, .099); assert.throws(() => carried.reserve(body), /reservation/);
       assert.throws(() => new Budget(-1), /Invalid prior/);
-      const exceeded = new Budget(); assert.throws(() => exceeded.record({ ...usage, inputTokens: 4097 }), /exceeded/); assert.equal(exceeded.unknownUsage, true);
+      const exceeded = new Budget(); exceeded.reserve(body); const excessive = usageFromResponse({usageMetadata:{promptTokenCount:4097,candidatesTokenCount:20,thoughtsTokenCount:30,totalTokenCount:4147}}); assert.throws(() => exceeded.record(excessive), /exceeded/); assert.equal(exceeded.unknownUsage, true);
       console.log('guardrails passed');
     `;
     await writeFile(join(root, "guardrails.mjs"), source);
@@ -65,9 +160,10 @@ describe("live Gemini adapter offline guardrails", () => {
     const root = await fixture();
     const wrapper = `
       process.env.GEMINI_API_KEY = 'offline-test-key-not-for-network';
+      process.env.GEMINI_MODEL = 'gemini-3.5-flash-lite';
       let calls = 0;
       globalThis.fetch = async (url, options) => {
-        if (!url.startsWith('https://generativelanguage.googleapis.com/') || options.headers['x-goog-api-key'] !== process.env.GEMINI_API_KEY) throw new Error('unexpected request');
+        if (url !== 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent' || options.headers['x-goog-api-key'] !== process.env.GEMINI_API_KEY) throw new Error('unexpected request/model');
         calls++;
         return new Response(JSON.stringify({ modelVersion: 'mock-gemini-version', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'Synthetic answer number ' + calls }] } }], usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, thoughtsTokenCount: 10, totalTokenCount: 130 } }), { status: 200 });
       };
@@ -108,6 +204,60 @@ describe("live Gemini adapter offline guardrails", () => {
         expect(await readFile(join(file.parentPath, file.name), "utf8")).not.toContain(
           "offline-test-key-not-for-network",
         );
+  });
+
+  it("reconciles legacy success evidence on an explicit retry without resetting unknown failures", async () => {
+    const root = await fixture();
+    const oldRoot = join(root, ".abilitybench", "experiment-legacy");
+    await mkdir(oldRoot, { recursive: true });
+    await writeFile(
+      join(oldRoot, "usage-ledger.json"),
+      JSON.stringify({
+        settings: { maxOutputTokens: 1024 },
+        pricing: { inputPerMillion: 0.75, cachedInputPerMillion: 0.075, outputPerMillion: 3.75 },
+        budget: { attempts: 2, reservedUsd: 0.013824 },
+        ledger: [
+          {
+            status: "completed",
+            usage: {
+              inputTokens: 92,
+              outputTokens: 37,
+              thinkingTokens: 588,
+              cachedInputTokens: 0,
+              totalTokens: 717,
+              estimatedCostUsd: 0.00241275,
+            },
+          },
+          { status: "failed", usage: null },
+        ],
+      }),
+    );
+    await writeFile(
+      join(root, "reconciled.mjs"),
+      `
+      process.env.GEMINI_API_KEY='offline-key'; let calls=0;
+      globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({modelVersion:'mock',candidates:[{finishReason:'STOP',content:{parts:[{text:'Short answer '+calls}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:130}}),{status:200});};
+      await import('./run.mjs'); if(calls!==12||process.exitCode)throw new Error('retry failed');
+    `,
+    );
+    const result = spawnSync(process.execPath, [join(root, "reconciled.mjs")], {
+      encoding: "utf8",
+      timeout: 20_000,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const name = (await readdir(join(root, ".abilitybench"))).find(
+      (item) => item.startsWith("experiment-") && item !== "experiment-legacy",
+    );
+    const report = JSON.parse(
+      await readFile(join(root, ".abilitybench", name ?? "missing", "results.json"), "utf8"),
+    );
+    expect(report.priorReservedUsd).toBeCloseTo(0.00241275 + 0.006912, 12);
+    expect(report.accountedExposureUsd).toBeCloseTo(
+      report.priorReservedUsd + report.totalEstimatedCostUsd,
+      12,
+    );
+    expect(report.grossNewReservationsUsd).toBeCloseTo(0.082944, 12);
+    expect(report.accountedExposureUsd).toBeLessThan(0.1);
   });
 
   it("stops after one failed provider attempt, retains unknown accounting, and never retries", async () => {
