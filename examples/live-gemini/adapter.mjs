@@ -4,14 +4,14 @@ import { join } from "node:path";
 import { canonicalizeJson, defineWorkflow } from "../../dist/index.js";
 
 export const SETTINGS = Object.freeze({
-  model: "gemini-3.8-flash",
+  model: "gemini-3.5-flash-lite",
   thinkingLevel: "LOW",
   maxOutputTokens: 1024,
 });
 export const PRICING = Object.freeze({
-  inputPerMillion: 0.75,
-  cachedInputPerMillion: 0.075,
-  outputPerMillion: 3.75,
+  inputPerMillion: 0.3,
+  cachedInputPerMillion: 0.03,
+  outputPerMillion: 2.5,
   checkedAt: "2026-10-13",
   source: "https://ai.google.dev/gemini-api/docs/pricing",
 });

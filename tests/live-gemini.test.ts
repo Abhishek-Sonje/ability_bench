@@ -10,16 +10,23 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-// Preserve regression coverage of the original $0.10 guard alongside the approved cap.
-async function fixture(fastRetries = false, capUsd = 0.1) {
+// Preserve historical Flash/$0.10 regression coverage alongside the approved Lite profile.
+async function fixture(fastRetries = false, capUsd = 0.1, modelProfile = "flash") {
   const root = await mkdtemp(join(tmpdir(), "abilitybench-gemini-offline-"));
   roots.push(root);
   const sdk = pathToFileURL(resolve("dist/index.js")).href;
   for (const name of ["adapter.mjs", "run.mjs"]) {
     const source = await readFile(resolve("examples/live-gemini", name), "utf8");
-    const imported = source
+    let imported = source
       .replace('"../../dist/index.js"', JSON.stringify(sdk))
       .replace("export const BUDGET_CAP_USD = 0.11;", `export const BUDGET_CAP_USD = ${capUsd};`);
+    if (modelProfile === "flash" && name === "adapter.mjs") {
+      imported = imported
+        .replace('model: "gemini-3.5-flash-lite"', 'model: "gemini-3.8-flash"')
+        .replace("inputPerMillion: 0.3,", "inputPerMillion: 0.75,")
+        .replace("cachedInputPerMillion: 0.03,", "cachedInputPerMillion: 0.075,")
+        .replace("outputPerMillion: 2.5,", "outputPerMillion: 3.75,");
+    }
     await writeFile(
       join(root, name),
       fastRetries && name === "run.mjs"
@@ -31,6 +38,49 @@ async function fixture(fastRetries = false, capUsd = 0.1) {
 }
 
 describe("live Gemini adapter offline guardrails", () => {
+  it("runs the unchanged 5/2/5 protocol with Lite pricing and retains historical Flash exposure", async () => {
+    const root = await fixture(false, 0.11, "lite");
+    await mkdir(join(root, ".abilitybench", "experiment-flash"), { recursive: true });
+    const previous = JSON.stringify({
+      settings: { model: "gemini-3.8-flash", maxOutputTokens: 1024 },
+      pricing: { inputPerMillion: 0.75, cachedInputPerMillion: 0.075, outputPerMillion: 3.75 },
+      budget: { attempts: 1 },
+      ledger: [{ status: "failed", usage: null }],
+    });
+    await writeFile(join(root, ".abilitybench", "experiment-flash", "usage-ledger.json"), previous);
+    await writeFile(
+      join(root, "lite.mjs"),
+      `
+      process.env.GEMINI_API_KEY='offline-key';let calls=0;
+      globalThis.fetch=async(url,options)=>{if(!url.endsWith('/gemini-3.5-flash-lite:generateContent'))throw new Error('wrong model');const body=JSON.parse(options.body);if(body.generationConfig.maxOutputTokens!==1024||body.generationConfig.thinkingConfig.thinkingLevel!=='LOW')throw new Error('changed allowances');calls++;return new Response(JSON.stringify({modelVersion:'mock-lite',candidates:[{finishReason:'STOP',content:{parts:[{text:'Answer '+calls}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:130}}),{status:200});};
+      await import('./run.mjs');if(calls!==12||process.exitCode)throw new Error('protocol failed');
+    `,
+    );
+    const result = spawnSync(process.execPath, [join(root, "lite.mjs")], {
+      encoding: "utf8",
+      timeout: 20_000,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const name = (await readdir(join(root, ".abilitybench"))).find(
+      (item) => item.startsWith("experiment-") && item !== "experiment-flash",
+    );
+    const report = JSON.parse(
+      await readFile(join(root, ".abilitybench", name ?? "missing", "results.json"), "utf8"),
+    );
+    expect(report.settings.model).toBe("gemini-3.5-flash-lite");
+    expect(
+      report.measurements.map(
+        (value: { generationSuccesses: number }) => value.generationSuccesses,
+      ),
+    ).toEqual([5, 2, 5]);
+    expect(report.priorReservedUsd).toBeCloseTo(0.006912, 12);
+    expect(report.grossNewReservationsUsd).toBeCloseTo(0.0454656, 12);
+    expect(report.totalEstimatedCostUsd).toBeCloseTo((12 * (100 * 0.3 + 30 * 2.5)) / 1_000_000, 12);
+    expect(report.baselineUnchanged).toBe(true);
+    expect(
+      await readFile(join(root, ".abilitybench", "experiment-flash", "usage-ledger.json"), "utf8"),
+    ).toBe(previous);
+  });
   it("uses the approved $0.11 default without removing reservation or protocol guards", async () => {
     const root = await fixture(false, 0.11);
     const adapter = pathToFileURL(join(root, "adapter.mjs")).href;
