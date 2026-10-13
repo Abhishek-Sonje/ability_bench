@@ -10,18 +10,125 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-async function fixture() {
+async function fixture(fastRetries = false) {
   const root = await mkdtemp(join(tmpdir(), "abilitybench-gemini-offline-"));
   roots.push(root);
   const sdk = pathToFileURL(resolve("dist/index.js")).href;
   for (const name of ["adapter.mjs", "run.mjs"]) {
     const source = await readFile(resolve("examples/live-gemini", name), "utf8");
-    await writeFile(join(root, name), source.replace('"../../dist/index.js"', JSON.stringify(sdk)));
+    const imported = source.replace('"../../dist/index.js"', JSON.stringify(sdk));
+    await writeFile(
+      join(root, name),
+      fastRetries && name === "run.mjs"
+        ? imported.replace("await delay(waitMs);", "await Promise.resolve();")
+        : imported,
+    );
   }
   return root;
 }
 
 describe("live Gemini adapter offline guardrails", () => {
+  it("bounds exponential delays and honors seconds/date Retry-After without retrying early", async () => {
+    const root = await fixture();
+    const adapter = pathToFileURL(join(root, "adapter.mjs")).href;
+    await writeFile(
+      join(root, "delays.mjs"),
+      `
+      import assert from 'node:assert/strict'; import {retryDelay} from ${JSON.stringify(adapter)};
+      const now=Date.parse('2026-10-13T10:00:00Z');
+      assert.equal(retryDelay(1,null,now,()=>0),1000);
+      assert.equal(retryDelay(2,null,now,()=>0),2000);
+      assert.equal(retryDelay(1,'5',now,()=>0),5000);
+      assert.equal(retryDelay(2,'Tue, 13 Oct 2026 10:00:08 GMT',now,()=>0),8000);
+      assert.equal(retryDelay(1,'Tue, 13 Oct 2026 09:59:00 GMT',now,()=>0),1000);
+      assert.equal(retryDelay(1,'invalid',now,()=>0),1000);
+      assert.throws(()=>retryDelay(1,'31',now,()=>0),/bounded wait/);
+      assert.throws(()=>retryDelay(1,'Tue, 13 Oct 2026 10:01:00 GMT',now,()=>0),/bounded wait/);
+      assert.throws(()=>retryDelay(3,null,now,()=>0),/retry limit/);
+    `,
+    );
+    const result = spawnSync(process.execPath, [join(root, "delays.mjs")], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it("recovers from a 503 without completing that failed attempt or hiding unknown costs", async () => {
+    const root = await fixture(true);
+    await writeFile(
+      join(root, "recovery.mjs"),
+      `
+      process.env.GEMINI_API_KEY='offline-key'; let calls=0;
+      globalThis.fetch=async()=>{calls++; if(calls===1)return new Response(JSON.stringify({error:{status:'UNAVAILABLE',message:'High demand.'}}),{status:503,headers:{'Retry-After':'2'}});return new Response(JSON.stringify({modelVersion:'mock',candidates:[{finishReason:'STOP',content:{parts:[{text:'Answer '+calls}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:130}}),{status:200});};
+      await import('./run.mjs'); if(calls!==13||process.exitCode)throw new Error('recovery failed');
+    `,
+    );
+    const result = spawnSync(process.execPath, [join(root, "recovery.mjs")], {
+      encoding: "utf8",
+      timeout: 20_000,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    const names = await readdir(join(root, ".abilitybench"));
+    const evidence = join(
+      root,
+      ".abilitybench",
+      names.find((name) => name.startsWith("experiment-")) ?? "missing",
+    );
+    const ledger = JSON.parse(await readFile(join(evidence, "usage-ledger.json"), "utf8"));
+    expect(ledger.ledger[0]).toMatchObject({
+      status: "failed",
+      httpStatus: 503,
+      usage: null,
+      retryDelayMs: 2000,
+    });
+    expect(ledger.ledger[1]).toMatchObject({ status: "completed", attempt: 2 });
+    const report = JSON.parse(await readFile(join(evidence, "results.json"), "utf8"));
+    expect(report.status).toBe("completed");
+    expect(report.providerFailures).toHaveLength(1);
+    expect(report.abilityBenchFailures).toEqual([]);
+    expect(report.usageComplete).toBe(false);
+    expect(report.savingsAreKnownUsageOnly).toBe(true);
+    expect(report.savings.baseline.estimatedCostUsd.available).toBe(false);
+    expect(report.accountedExposureUsd).toBeCloseTo(0.006912 + report.totalEstimatedCostUsd, 12);
+    expect(
+      report.measurements.map((value: { generationAttempts: number }) => value.generationAttempts),
+    ).toEqual([6, 2, 5]);
+    expect(
+      report.executionResults.every((value: { status: string }) => value.status === "completed"),
+    ).toBe(true);
+  });
+
+  it("stops after three 503 attempts and publishes no completed engine run", async () => {
+    const root = await fixture(true);
+    await writeFile(
+      join(root, "unavailable.mjs"),
+      `
+      process.env.GEMINI_API_KEY='offline-key';let calls=0;
+      globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({error:{status:'UNAVAILABLE',message:'Unavailable.'}}),{status:503});};
+      await import('./run.mjs');if(calls!==3)throw new Error('unbounded retries');
+    `,
+    );
+    const result = spawnSync(process.execPath, [join(root, "unavailable.mjs")], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    expect(result.status).toBe(1);
+    const names = await readdir(join(root, ".abilitybench"));
+    const evidence = join(
+      root,
+      ".abilitybench",
+      names.find((name) => name.startsWith("experiment-")) ?? "missing",
+    );
+    const report = JSON.parse(await readFile(join(evidence, "results.json"), "utf8"));
+    expect(report.status).toBe("incomplete");
+    expect(report.providerFailures).toHaveLength(3);
+    expect(report.executionResults).toEqual([]);
+    expect(report.abilityBenchFailures).toEqual([]);
+    expect(report.accountedExposureUsd).toBeCloseTo(3 * 0.006912, 12);
+    expect(await readdir(join(evidence, "baseline"))).not.toContain(".abilitybench");
+  });
+
   it("releases known reservations, preserves unknown exposure, and fails closed on invalid history", async () => {
     const root = await fixture();
     const adapter = pathToFileURL(join(root, "adapter.mjs")).href;
@@ -50,7 +157,10 @@ describe("live Gemini adapter offline guardrails", () => {
       const exhausted=new Budget(.099); assert.throws(()=>exhausted.reserve({}), /reservation/); assert.equal(exhausted.attempts,0);
       const within=new Budget(.01); within.preflight();
       for(let i=0;i<12;i++){within.reserve({});within.record(usage);assert.ok(within.reservedUsd<=.1);}
-      assert.throws(()=>within.reserve({}), /12-request/);
+      for(let i=12;i<15;i++){within.reserve({});within.record(usage);}
+      assert.throws(()=>within.reserve({}), /15-request/);
+      const proposed=new Budget(prior,.11); proposed.preflight(); proposed.reserve({});
+      assert.throws(()=>proposed.preflight(), /Complete validation/);
     `,
     );
     const result = spawnSync(process.execPath, [join(root, "accounting.mjs")], {
@@ -60,13 +170,82 @@ describe("live Gemini adapter offline guardrails", () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
+  it("denies a 503 retry when it would consume remaining protocol headroom", async () => {
+    const root = await fixture(true);
+    await mkdir(join(root, ".abilitybench", "experiment-prior"), { recursive: true });
+    await writeFile(
+      join(root, ".abilitybench", "experiment-prior", "usage-ledger.json"),
+      JSON.stringify({
+        settings: { maxOutputTokens: 1024 },
+        pricing: { inputPerMillion: 0.75, cachedInputPerMillion: 0.075, outputPerMillion: 3.75 },
+        budget: { attempts: 2 },
+        ledger: [
+          { status: "failed", usage: null },
+          { status: "failed", usage: null },
+        ],
+      }),
+    );
+    await writeFile(
+      join(root, "denied.mjs"),
+      `process.env.GEMINI_API_KEY='offline-key';let calls=0;globalThis.fetch=async()=>{calls++;return new Response('{}',{status:503});};await import('./run.mjs');if(calls!==1)throw new Error('budget bypass');`,
+    );
+    const result = spawnSync(process.execPath, [join(root, "denied.mjs")], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    expect(result.status).toBe(1);
+    const name = (await readdir(join(root, ".abilitybench"))).find(
+      (item) => item.startsWith("experiment-") && item !== "experiment-prior",
+    );
+    const report = JSON.parse(
+      await readFile(join(root, ".abilitybench", name ?? "missing", "results.json"), "utf8"),
+    );
+    expect(report.status).toBe("incomplete");
+    expect(report.finalFailure.origin).toBe("retry_guard");
+    expect(report.providerFailures).toHaveLength(1);
+    expect(report.executionResults).toEqual([]);
+    expect(report.accountedExposureUsd).toBeCloseTo(0.020736, 12);
+  });
+
+  it("separates engine failures from successfully captured provider responses", async () => {
+    const root = await fixture(true);
+    const path = join(root, "run.mjs");
+    await writeFile(
+      path,
+      (await readFile(path, "utf8")).replace(
+        "runWorkflow(workflow, options)",
+        "Promise.reject(new Error('Synthetic engine failure'))",
+      ),
+    );
+    await writeFile(
+      join(root, "engine-failure.mjs"),
+      `process.env.GEMINI_API_KEY='offline-key';globalThis.fetch=async()=>new Response(JSON.stringify({modelVersion:'mock',candidates:[{finishReason:'STOP',content:{parts:[{text:'Short answer'}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:130}}),{status:200});await import('./run.mjs');`,
+    );
+    const result = spawnSync(process.execPath, [join(root, "engine-failure.mjs")], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    expect(result.status).toBe(1);
+    const name = (await readdir(join(root, ".abilitybench"))).find((item) =>
+      item.startsWith("experiment-"),
+    );
+    const report = JSON.parse(
+      await readFile(join(root, ".abilitybench", name ?? "missing", "results.json"), "utf8"),
+    );
+    expect(report.finalFailure.origin).toBe("abilitybench");
+    expect(report.abilityBenchFailures).toHaveLength(1);
+    expect(report.providerFailures).toEqual([]);
+    expect(report.status).toBe("incomplete");
+    expect(report.executionResults).toEqual([]);
+  });
+
   it("accounts explicit retry attempts cumulatively and rejects a retry before fetch when the cap cannot fit", async () => {
     const root = await fixture();
     await writeFile(
       join(root, "retry.mjs"),
       `
       process.env.GEMINI_API_KEY='offline-key'; let calls=0;
-      globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({error:{status:'UNAVAILABLE',message:'High demand.'}}),{status:503});};
+      globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({error:{status:'UNAVAILABLE',message:'High demand.'}}),{status:503,headers:{'Retry-After':'31'}});};
       try { await import('./run.mjs'); } catch(error) { console.error(error.message); process.exitCode=1; }
       console.log('fetch-count='+calls);
     `,
@@ -136,8 +315,8 @@ describe("live Gemini adapter offline guardrails", () => {
       assert.ok(Math.abs(usage.estimatedCostUsd - (90 * .75 + 10 * .075 + 50 * 3.75) / 1000000) < 1e-12);
       assert.equal(usageFromResponse({ usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, totalTokenCount: 150 } }).thinkingTokens, 30);
       for (const value of [{}, { usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, totalTokenCount: 90 } }, { usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, totalTokenCount: 120, cachedContentTokenCount: 101 } }]) assert.throws(() => usageFromResponse(value));
-      const budget = new Budget(); for (let i = 0; i < 12; i++) budget.reserve(body);
-      assert.ok(budget.reservedUsd < .10); assert.throws(() => budget.reserve(body), /12-request/);
+      const budget = new Budget(); for (let i = 0; i < 14; i++) budget.reserve(body);
+      assert.ok(budget.reservedUsd < .10); assert.throws(() => budget.reserve(body), /reservation/);
       const oversized = new Budget(); assert.throws(() => oversized.reserve({ text: 'x'.repeat(2049) }), /2,048/); assert.equal(oversized.attempts, 0);
       const unknown = new Budget(); unknown.unknownUsage = true; assert.throws(() => unknown.reserve(body), /unknown usage/);
       const expired = new Budget(); expired.started -= 300001; assert.throws(() => expired.reserve(body), /Five-minute/);
@@ -280,6 +459,10 @@ describe("live Gemini adapter offline guardrails", () => {
     };
     expect(ledger.budget).toMatchObject({ unknownUsage: true, attempts: 1 });
     expect(ledger.ledger).toEqual([expect.objectContaining({ status: "failed", usage: null })]);
-    expect(await readdir(evidence)).not.toContain("results.json");
+    const report = JSON.parse(await readFile(join(evidence, "results.json"), "utf8"));
+    expect(report.status).toBe("incomplete");
+    expect(report.finalFailure.origin).toBe("provider");
+    expect(report.abilityBenchFailures).toEqual([]);
+    expect(report.executionResults).toEqual([]);
   });
 });

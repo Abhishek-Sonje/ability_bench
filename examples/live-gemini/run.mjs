@@ -10,6 +10,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { parseEnv } from "node:util";
 import {
   canonicalizeJson,
@@ -25,9 +26,12 @@ import {
   GRAPH,
   outputFromSnapshot,
   PRICING,
+  PROTOCOL_CALLS,
   providerFailure,
+  RETRY_POLICY,
   requestBody,
   retainedExposure,
+  retryDelay,
   SETTINGS,
   usageFromResponse,
 } from "./adapter.mjs";
@@ -62,6 +66,8 @@ try {
   const evidence = await mkdtemp(join(evidenceParent, "experiment-"));
   const ledger = [];
   const measurements = [];
+  const executionResults = [];
+  let completedCaptures = 0;
   let resolvedModelVersion = null;
   const syntheticCatalog = {
     text: "Synthetic scenario: a fictional three-person support team handles 40 tickets daily. Option A: shared inbox, $20 monthly, manual tags. Option B: automated triage, $60 monthly, needs human review. No customer data or real company claims. Budget $70 monthly.",
@@ -90,80 +96,159 @@ try {
   }
 
   async function generate(stageId, body, scenario) {
-    const timeout = budget.reserve(body);
-    const entry = {
-      scenario,
-      stageId,
-      requestHash: digest({ model: SETTINGS.model, body }),
-      status: "dispatched",
-      startedAt: new Date().toISOString(),
-      usage: null,
-      elapsedMs: null,
-    };
-    ledger.push(entry);
-    await persist();
-    const started = performance.now();
-    try {
-      // Header only: never place credentials in a URL, log, artifact, or error diagnostic.
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${SETTINGS.model}:generateContent`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-          body: JSON.stringify(body),
-          signal: AbortSignal.timeout(Math.ceil(timeout)),
-        },
-      );
-      entry.httpStatus = response.status;
-      if (!response.ok) {
-        const diagnostic = await response.json().catch(() => null);
-        throw new Error(providerFailure(response.status, diagnostic, apiKey));
+    for (let attempt = 1; attempt <= RETRY_POLICY.maxAttemptsPerStage; attempt++) {
+      // Leave worst-case headroom for every still-required successful capture.
+      try {
+        budget.preflight(PROTOCOL_CALLS - completedCaptures);
+      } catch (error) {
+        error.failureOrigin = "budget_guard";
+        throw error;
       }
-      const value = await response.json();
-      const usage = usageFromResponse(value);
-      entry.usage = usage;
-      budget.record(usage);
-      if (typeof value.modelVersion !== "string" || !value.modelVersion)
-        throw new Error("Response did not record a resolved model version.");
-      resolvedModelVersion ??= value.modelVersion;
-      if (value.modelVersion !== resolvedModelVersion)
-        throw new Error("Provider model version changed during the experiment.");
-      const candidate = value.candidates?.[0];
-      const text = candidate?.content?.parts
-        ?.filter((part) => !part.thought && typeof part.text === "string")
-        .map((part) => part.text)
-        .join("");
-      if (candidate?.finishReason !== "STOP" || !text?.trim())
-        throw new Error("Response was blocked, truncated, or empty. No retry.");
-      entry.status = "completed";
-      const snapshot = {
-        requestHash: entry.requestHash,
-        modelVersion: value.modelVersion,
-        text,
-        usageMetadata: value.usageMetadata,
+      let timeout;
+      try {
+        timeout = budget.reserve(body);
+      } catch (error) {
+        error.failureOrigin = "budget_guard";
+        throw error;
+      }
+      const entry = {
+        scenario,
+        stageId,
+        attempt,
+        requestHash: digest({ model: SETTINGS.model, body }),
+        status: "dispatched",
+        startedAt: new Date().toISOString(),
+        usage: null,
+        elapsedMs: null,
       };
-      await writeFile(
-        join(evidence, `${scenario}-${stageId}-request.json`),
-        canonicalizeJson({ model: SETTINGS.model, body }),
-      );
-      await writeFile(
-        join(evidence, `${scenario}-${stageId}-response.json`),
-        JSON.stringify(value, null, 2),
-      );
-      return snapshot;
-    } catch (error) {
-      entry.status = "failed";
-      if (entry.usage === null) budget.unknownUsage = true;
-      // Preserve a safe diagnostic only; fetch's cause may contain request internals.
-      entry.failure =
-        error instanceof Error && !error.message.includes(apiKey)
-          ? error.message
-          : "Provider call failed.";
-      throw new Error(entry.failure);
-    } finally {
-      entry.elapsedMs = performance.now() - started;
+      ledger.push(entry);
       await persist();
+      const started = performance.now();
+      let attemptFailure;
+      let retryAfter = null;
+      let failureOrigin = "provider";
+      try {
+        // Header only: never place credentials in a URL, log, artifact, or error diagnostic.
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${SETTINGS.model}:generateContent`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(Math.ceil(timeout)),
+          },
+        );
+        entry.httpStatus = response.status;
+        if (!response.ok) {
+          retryAfter = response.headers.get("Retry-After");
+          const diagnostic = await response.json().catch(() => null);
+          throw new Error(providerFailure(response.status, diagnostic, apiKey));
+        }
+        const value = await response.json();
+        const usage = usageFromResponse(value);
+        entry.usage = usage;
+        failureOrigin = "budget_guard";
+        budget.record(usage);
+        failureOrigin = "provider";
+        if (typeof value.modelVersion !== "string" || !value.modelVersion)
+          throw new Error("Response did not record a resolved model version.");
+        resolvedModelVersion ??= value.modelVersion;
+        if (value.modelVersion !== resolvedModelVersion)
+          throw new Error("Provider model version changed during the experiment.");
+        const candidate = value.candidates?.[0];
+        const text = candidate?.content?.parts
+          ?.filter((part) => !part.thought && typeof part.text === "string")
+          .map((part) => part.text)
+          .join("");
+        if (candidate?.finishReason !== "STOP" || !text?.trim())
+          throw new Error("Response was blocked, truncated, or empty. No retry.");
+        entry.status = "completed";
+        const snapshot = {
+          requestHash: entry.requestHash,
+          modelVersion: value.modelVersion,
+          text,
+          usageMetadata: value.usageMetadata,
+        };
+        failureOrigin = "adapter";
+        await writeFile(
+          join(evidence, `${scenario}-${stageId}-request.json`),
+          canonicalizeJson({ model: SETTINGS.model, body }),
+        );
+        await writeFile(
+          join(evidence, `${scenario}-${stageId}-response.json`),
+          JSON.stringify(value, null, 2),
+        );
+        completedCaptures++;
+        return snapshot;
+      } catch (error) {
+        entry.status = "failed";
+        // A 503 remains fully reserved, but may be retried under the bounded policy.
+        if (entry.usage === null && entry.httpStatus !== 503) budget.unknownUsage = true;
+        // Preserve a safe diagnostic only; fetch's cause may contain request internals.
+        entry.failure =
+          error instanceof Error && !error.message.includes(apiKey)
+            ? error.message
+            : "Provider call failed.";
+        entry.failureOrigin = failureOrigin;
+        attemptFailure = new Error(entry.failure);
+        attemptFailure.failureOrigin = failureOrigin;
+      } finally {
+        entry.elapsedMs = performance.now() - started;
+        await persist();
+      }
+      if (entry.httpStatus !== 503 || attempt >= RETRY_POLICY.maxAttemptsPerStage)
+        throw attemptFailure;
+      let waitMs;
+      try {
+        waitMs = retryDelay(attempt, retryAfter);
+        budget.preflight(PROTOCOL_CALLS - completedCaptures);
+        if (performance.now() - budget.started + waitMs >= 300_000)
+          throw new Error("Retry wait exceeds the five-minute experiment deadline.");
+      } catch (error) {
+        error.failureOrigin = "retry_guard";
+        throw error;
+      }
+      entry.retryDelayMs = waitMs;
+      await persist();
+      await delay(waitMs);
     }
+  }
+
+  async function engine(operation) {
+    try {
+      return await operation();
+    } catch (error) {
+      error.failureOrigin = "abilitybench";
+      throw error;
+    }
+  }
+
+  function failureSummary(error = null) {
+    const finalFailure = error
+      ? {
+          origin: error.failureOrigin ?? "adapter",
+          message: error.message.includes(apiKey) ? "Diagnostic redacted." : error.message,
+        }
+      : null;
+    return {
+      finalFailure,
+      providerFailures: ledger
+        .filter((entry) => entry.failureOrigin === "provider")
+        .map(({ scenario, stageId, attempt, httpStatus, failure, retryDelayMs }) => ({
+          scenario,
+          stageId,
+          attempt,
+          httpStatus,
+          message: failure,
+          retryDelayMs,
+        })),
+      abilityBenchFailures: finalFailure?.origin === "abilitybench" ? [finalFailure] : [],
+      adapterOrGuardFailures:
+        finalFailure && !["abilitybench", "provider"].includes(finalFailure.origin)
+          ? [finalFailure]
+          : [],
+      executionResults,
+    };
   }
 
   async function prepareProject(scenario, baselineRoot = null, changed = false) {
@@ -192,7 +277,7 @@ try {
     const started = performance.now();
     const ledgerStart = ledger.length;
     const toolMetrics = { localCatalogLookupCalls: 0, providerToolCalls: 0 };
-    const workflow = await buildWorkflow(root, toolMetrics);
+    const workflow = await engine(() => buildWorkflow(root, toolMetrics));
     const options = { inputs: {}, baseline: baseline ? { runId: baseline.manifest.id } : null };
     if (baseline) {
       // Publish byte-identical baseline history into this isolated project. Original history remains untouched.
@@ -204,7 +289,7 @@ try {
           await copyFile(join(origin, folder, name), join(target, folder, name));
       }
     }
-    const preliminary = await planWorkflowRun(workflow, options);
+    const preliminary = await engine(() => planWorkflowRun(workflow, options));
     const outputs = {};
     const artifacts = baseline ? new FileArtifactStore(join(baseline.root, ".abilitybench")) : null;
     for (const stageId of workflow.topologicalOrder) {
@@ -230,8 +315,19 @@ try {
       await writeFile(join(root, "snapshots", `${stageId}.json`), canonicalizeJson(snapshot));
       outputs[stageId] = outputFromSnapshot(snapshot, body);
     }
-    const result = await runWorkflow(workflow, options);
-    assert.equal(result.manifest.executionStatus, "completed");
+    const result = await engine(() => runWorkflow(workflow, options));
+    executionResults.push({
+      scenario,
+      runId: result.manifest.id,
+      status: result.manifest.executionStatus,
+    });
+    if (result.manifest.executionStatus !== "completed") {
+      const error = new Error(
+        "AbilityBench execution did not complete; inspect the recorded manifest.",
+      );
+      error.failureOrigin = "abilitybench";
+      throw error;
+    }
     assert.deepEqual(
       result.plan.decisions.map(({ stageId, decision }) => [stageId, decision]),
       preliminary.plan.decisions.map(({ stageId, decision }) => [stageId, decision]),
@@ -257,6 +353,7 @@ try {
     const calls = ledger.slice(ledgerStart);
     const usage = calls.reduce(
       (sum, entry) => {
+        if (entry.usage === null) return sum;
         for (const key of Object.keys(sum)) sum[key] += entry.usage[key];
         return sum;
       },
@@ -275,6 +372,10 @@ try {
       baselineRunId: result.manifest.baselineRunId,
       generationAttempts: calls.length,
       generationSuccesses: calls.filter((entry) => entry.status === "completed").length,
+      unknownUsageAttempts: calls.filter((entry) => entry.usage === null).length,
+      unknownUsageReservedUsd:
+        calls.filter((entry) => entry.usage === null).length * budget.reservations[0].amountUsd,
+      retryWaitMs: calls.reduce((sum, entry) => sum + (entry.retryDelayMs ?? 0), 0),
       ...toolMetrics,
       ...usage,
       providerElapsedMs: calls.reduce((sum, entry) => sum + entry.elapsedMs, 0),
@@ -295,7 +396,7 @@ try {
 
   try {
     console.log(
-      `Evidence directory: ${evidence}\nMaximum 12 generation requests; estimated budget $0.10; no retries.`,
+      `Evidence directory: ${evidence}\nModel ${SETTINGS.model}; maximum 15 attempts; budget $${budget.capUsd.toFixed(2)}; bounded 503 retries.`,
     );
     const baselineRoot = await prepareProject("baseline");
     const baseline = await runScenario("baseline", baselineRoot);
@@ -308,11 +409,11 @@ try {
     const baselineBytes = await readFile(baselinePath);
     const candidateRoot = await prepareProject("incremental", baselineRoot, true);
     const candidate = await runScenario("incremental", candidateRoot, baseline);
-    assert.equal(baseline.measurement.generationAttempts, 5);
-    assert.equal(candidate.measurement.generationAttempts, 2);
+    assert.equal(baseline.measurement.generationSuccesses, 5);
+    assert.equal(candidate.measurement.generationSuccesses, 2);
     const fullRoot = await prepareProject("full-control", null, true);
     const full = await runScenario("full-control", fullRoot);
-    assert.equal(full.measurement.generationAttempts, 5);
+    assert.equal(full.measurement.generationSuccesses, 5);
     assert.deepEqual(await readFile(baselinePath), baselineBytes);
     const savings = {};
     for (const reference of [baseline, full]) {
@@ -329,20 +430,38 @@ try {
           "elapsedMs",
         ].map((key) => [
           key,
-          {
-            avoided: reference.measurement[key] - candidate.measurement[key],
-            percent:
-              reference.measurement[key] === 0
-                ? null
-                : ((reference.measurement[key] - candidate.measurement[key]) /
-                    reference.measurement[key]) *
-                  100,
-          },
+          (reference.measurement.unknownUsageAttempts > 0 ||
+            candidate.measurement.unknownUsageAttempts > 0) &&
+          [
+            "inputTokens",
+            "outputTokens",
+            "thinkingTokens",
+            "totalTokens",
+            "estimatedCostUsd",
+          ].includes(key)
+            ? {
+                available: false,
+                reason:
+                  "Provider usage is unknown for one or more attempts; actual savings cannot be calculated.",
+              }
+            : {
+                available: true,
+                avoided: reference.measurement[key] - candidate.measurement[key],
+                percent:
+                  reference.measurement[key] === 0
+                    ? null
+                    : ((reference.measurement[key] - candidate.measurement[key]) /
+                        reference.measurement[key]) *
+                      100,
+              },
         ]),
       );
     }
     const report = {
       status: "completed",
+      ...failureSummary(),
+      usageComplete: ledger.every((entry) => entry.usage !== null),
+      savingsAreKnownUsageOnly: ledger.some((entry) => entry.usage === null),
       runtime: { nodeVersion: process.version, platform: process.platform, arch: process.arch },
       priorReservedUsd,
       settings: SETTINGS,
@@ -352,6 +471,7 @@ try {
       savings,
       baselineUnchanged: true,
       totalEstimatedCostUsd: budget.measuredUsd,
+      knownUsageEstimatedCostUsd: budget.measuredUsd,
       accountedExposureUsd: budget.reservedUsd,
       grossNewReservationsUsd: budget.grossReservedUsd,
       scope:
@@ -361,8 +481,19 @@ try {
     console.log(JSON.stringify(report, null, 2));
   } catch (error) {
     await persist();
+    const report = {
+      status: "incomplete",
+      ...failureSummary(error),
+      settings: SETTINGS,
+      measurements,
+      accountedExposureUsd: budget.reservedUsd,
+      knownUsageEstimatedCostUsd: budget.measuredUsd,
+      unknownUsageAttempts: ledger.filter((entry) => entry.usage === null).length,
+      unexecutedScenariosAreNotCompleted: true,
+    };
+    await writeFile(join(evidence, "results.json"), JSON.stringify(report, null, 2));
     console.error(
-      `Experiment stopped: ${error.message}\nEvidence retained at ${evidence}. No automatic retry or budget reset.`,
+      `Experiment stopped (${report.finalFailure.origin}): ${report.finalFailure.message}\nEvidence retained at ${evidence}. No budget reset.`,
     );
     process.exitCode = 1;
   }

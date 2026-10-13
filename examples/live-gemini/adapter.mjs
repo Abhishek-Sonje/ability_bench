@@ -44,7 +44,30 @@ export function providerFailure(httpStatus, value, apiKey) {
     )
     .join("")
     .slice(0, 600);
-  return `Gemini HTTP ${httpStatus} (${status}): ${message} Request stopped without retry.`;
+  return `Gemini HTTP ${httpStatus} (${status}): ${message}`;
+}
+export const RETRY_POLICY = Object.freeze({
+  maxAttemptsPerStage: 3,
+  maxTotalAttempts: 15,
+  maxDelayMs: 30_000,
+});
+/** Retry-After is a minimum, never clamped into an earlier request. */
+export function retryDelay(attempt, retryAfter, now = Date.now(), random = Math.random) {
+  if (!Number.isSafeInteger(attempt) || attempt < 1 || attempt >= RETRY_POLICY.maxAttemptsPerStage)
+    throw new Error("503 retry limit reached.");
+  let minimum = 0;
+  if (typeof retryAfter === "string") {
+    const value = retryAfter.trim();
+    if (/^\d+$/.test(value)) minimum = Number(value) * 1000;
+    else {
+      const date = Date.parse(value);
+      if (Number.isFinite(date)) minimum = Math.max(0, date - now);
+    }
+  }
+  const delay = Math.max(1000 * 2 ** (attempt - 1) + Math.floor(random() * 251), minimum);
+  if (!Number.isFinite(delay) || delay > RETRY_POLICY.maxDelayMs)
+    throw new Error("Retry-After exceeds the bounded wait limit; stop instead of retrying early.");
+  return delay;
 }
 export function requestBody(prompt, dependencies) {
   return {
@@ -166,14 +189,12 @@ export function retainedExposure(previous) {
 
 /** Hard attempt/output/time limits plus conservative client-side spend reservations. */
 export class Budget {
-  constructor(priorReservedUsd = 0) {
-    if (
-      !Number.isFinite(priorReservedUsd) ||
-      priorReservedUsd < 0 ||
-      priorReservedUsd > BUDGET_CAP_USD
-    )
+  constructor(priorReservedUsd = 0, capUsd = BUDGET_CAP_USD) {
+    if (!Number.isFinite(capUsd) || capUsd <= 0) throw new Error("Invalid experiment budget cap.");
+    if (!Number.isFinite(priorReservedUsd) || priorReservedUsd < 0 || priorReservedUsd > capUsd)
       throw new Error("Invalid prior experiment reservation.");
     this.started = performance.now();
+    this.capUsd = capUsd;
     this.attempts = 0;
     this.priorReservedUsd = priorReservedUsd;
     this.reservedUsd = priorReservedUsd;
@@ -185,22 +206,23 @@ export class Budget {
   preflight(attempts = PROTOCOL_CALLS) {
     if (!Number.isSafeInteger(attempts) || attempts < 1 || attempts > PROTOCOL_CALLS)
       throw new Error("Invalid protocol attempt count.");
-    if (this.reservedUsd + attempts * requestReservation() > BUDGET_CAP_USD)
+    if (this.reservedUsd + attempts * requestReservation() > this.capUsd)
       throw new Error(
-        "Complete validation cannot fit the $0.10 worst-case reservation cap; no requests dispatched.",
+        `Complete validation cannot fit the $${this.capUsd.toFixed(2)} worst-case reservation cap; no further requests dispatched.`,
       );
   }
   reserve(body) {
     if (this.unknownUsage)
       throw new Error("An earlier request has unknown usage; no further requests allowed.");
-    if (this.attempts >= PROTOCOL_CALLS) throw new Error("12-request experiment limit reached.");
+    if (this.attempts >= RETRY_POLICY.maxTotalAttempts)
+      throw new Error("15-request experiment limit reached.");
     if (Buffer.byteLength(JSON.stringify(body), "utf8") > 2048)
       throw new Error("Request exceeds the 2,048-byte prompt envelope limit.");
     const remainingMs = 300_000 - (performance.now() - this.started);
     if (remainingMs <= 0) throw new Error("Five-minute experiment limit reached.");
     const worst = requestReservation();
-    if (this.reservedUsd + worst > BUDGET_CAP_USD)
-      throw new Error("Estimated $0.10 reservation limit reached.");
+    if (this.reservedUsd + worst > this.capUsd)
+      throw new Error(`Estimated $${this.capUsd.toFixed(2)} reservation limit reached.`);
     this.reservedUsd += worst;
     this.grossReservedUsd += worst;
     this.attempts++;

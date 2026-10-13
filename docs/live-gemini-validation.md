@@ -4,15 +4,15 @@
 
 Live validation remains incomplete: generation returned HTTP 503 before a baseline could finish. The sanitized provider diagnostic identifies `UNAVAILABLE` due to high model demand, not an authentication or billing error. No measured token/cost savings are claimed. Model metadata lookup succeeded with the same key; a key problem was not demonstrated. Provider usage for failed requests is unknown, not zero.
 
-Individual request logs and budget reservations stay in ignored local evidence under examples/live-gemini/.abilitybench/. They are not tracked as per-call reports. Explicit retries carry reconciled exposure forward under the shared $0.10 estimated ceiling; no automatic retries or model substitutions are enabled.
+Individual request logs and budget reservations stay in ignored local evidence under examples/live-gemini/.abilitybench/. They are not tracked as per-call reports. Explicit invocations carry reconciled exposure forward under the shared $0.10 estimated ceiling. Bounded HTTP 503 retries are supported within an invocation; no model substitutions are enabled.
 
-The adapter's offline tests pass. The full Windows quality gate passed with 202 active tests and one existing POSIX-only skip. Mocked request counts are not live evidence. No engine, cloud, replay, or UI features were added.
+The adapter's offline tests pass. The full Windows quality gate passed with 207 active tests and one existing POSIX-only skip. Mocked request counts are not live evidence. No engine, cloud, replay, or UI features were added.
 
 ## Reconciled budget and model audit
 
 Successful responses settle their individual reservation using validated provider token counts and the recorded published rates; unused reservation is released. Requests with unknown usage retain the full conservative reservation. On explicit retry, exposure is recomputed from each ledger's attempt entries using its original settings/prices, rather than summing cumulative totals. Known usage is validated before reconciliation, including failed requests that nevertheless returned valid usage. Historical evidence is not rewritten.
 
-The cap remains $0.10. A full-protocol preflight checks all 12 worst-case requests before dispatch. Every dispatched attempt still reserves separately and counts toward the attempt limit. Unknown usage stops that invocation; retries require another explicit invocation and cannot reset exposure. An exclusive local budget lock prevents concurrent invocations from sharing the same headroom. A stale lock fails closed: investigate the interrupted process before removing that exact lock; never clear ledgers to unlock spending.
+The cap remains $0.10. A full-protocol preflight checks all 12 required successful requests before dispatch. Every attempt reserves separately, including automatic 503 retries, and counts toward the 15-attempt total limit. Unknown usage stops the invocation except for specifically bounded 503 recovery, where the failed attempt's full reservation remains held. Every retry must leave worst-case headroom for all outstanding required captures. An exclusive local budget lock prevents concurrent invocations from sharing the same headroom. A stale lock fails closed: investigate the interrupted process before removing that exact lock; never clear ledgers to unlock spending.
 
 Current aggregate retained evidence: one known-usage response costs an estimated $0.00241275; three unknown-usage failures retain $0.020736. Reconciled exposure is $0.02314875, leaving $0.07685125 conservative headroom. The unchanged protocol reserves $0.082944, so its cumulative worst-case requirement is $0.10609275. Its actual final cost and invoice charges remain unknown. These figures were calculated offline; no live requests were made during the accounting fix.
 
@@ -28,7 +28,15 @@ Offline tests cover settlement and duplicate settlement, legacy ledger reconcili
 
 See [the experiment contract](../examples/live-gemini/README.md) for the DAG, inputs, pricing, bounds and invocation. Run a full baseline, change only the report prompt, run an incremental candidate against that immutable baseline, then run a full changed-prompt control.
 
-Expected calls are 5 / 2 / 5. The candidate must reuse catalog/facts/options/risks and execute report/summary. Verify unchanged baseline bytes and matching earlier fingerprints/artifacts. Report actual provider tokens, calls, tool invocations, elapsed time and estimated cost separately; do not substitute predictions for measurements.
+Expected successful captures are 5 / 2 / 5, plus separately reported bounded retry attempts. The candidate must reuse catalog/facts/options/risks and execute report/summary. Verify unchanged baseline bytes and matching earlier fingerprints/artifacts. Report actual provider tokens, calls, tool invocations, elapsed time and estimated cost separately; do not substitute predictions for measurements.
+
+## Bounded retries and failure reporting
+
+Only HTTP 503 is automatically retried: at most three attempts per stage, 15 overall, with 1s then 2s exponential backoff plus 0-250ms jitter. `Retry-After` delta seconds and HTTP dates are minimum waits. A value over the 30s wait bound causes a stop rather than an early retry. The five-minute deadline, per-call timeout, remaining protocol headroom, and cumulative cap still apply. Authentication errors, 429 responses, ambiguous successful-response usage, malformed output, and network timeouts are not automatically retried.
+
+Reports distinguish `providerFailures`, `abilityBenchFailures`, and `adapterOrGuardFailures`, with a separate final stop origin. Recovered provider failures remain visible. A failed capture attempt is never marked completed, and a capture-phase failure does not publish a completed engine run. Only actual engine results populate `executionResults`. A successful experiment can still have incomplete billing information: unknown attempts remain reserved, known costs are labelled, and affected token/cost savings are reported unavailable instead of treating failures as free. Retry wait time is separate from request time and included in end-to-end time.
+
+Offline verification of a hypothetical $0.11 cumulative cap: retained exposure $0.02314875 plus 12 worst-case calls $0.082944 equals $0.10609275, leaving $0.00390725. Thus the no-retry protocol fits, but one extra full reservation does not fit until successful requests release enough headroom. The guard stops rather than compromising outstanding protocol reservations. Reserving all 15 allowed attempts at their maximum would require $0.12682875. Budget safety is not guaranteed provider availability or completion, and published-rate reservations are not an enforceable invoice cap. The production default remains $0.10 pending explicit approval; no live requests were made during verification.
 
 ## Interpretation limits
 
