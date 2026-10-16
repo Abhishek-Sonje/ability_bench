@@ -35,6 +35,15 @@ import {
   SETTINGS,
   usageFromResponse,
 } from "./adapter.mjs";
+import {
+  CHANGED_PROMPT,
+  EXAMPLE_VERSION,
+  PROMPTS,
+  SOURCE_CATALOG,
+  validateCatalog,
+  validateStageInputs,
+  validateStageOutput,
+} from "./grounding.mjs";
 
 const args = process.argv.slice(2);
 if (args.length && (args.length !== 2 || args[0] !== "--env-file"))
@@ -69,21 +78,9 @@ try {
   const executionResults = [];
   let completedCaptures = 0;
   let resolvedModelVersion = null;
-  const syntheticCatalog = {
-    text: "Synthetic scenario: a fictional three-person support team handles 40 tickets daily. Option A: shared inbox, $20 monthly, manual tags. Option B: automated triage, $60 monthly, needs human review. No customer data or real company claims. Budget $70 monthly.",
-  };
-  const prompts = {
-    facts:
-      "Extract the budget and operational constraints. Use only provided facts. At most 25 words.",
-    options:
-      "Compare the two options against the constraints. Use only provided facts. At most 25 words.",
-    risks: "Identify one operational risk for each option from supplied facts. At most 25 words.",
-    report:
-      "Recommend one option using the supplied options and risks. Give one reason. At most 25 words.",
-    summary: "Summarize the recommendation without adding claims. At most 20 words.",
-  };
-  const changedPrompt =
-    "Recommend one option using the supplied options and risks. Include one reason AND one human-review safeguard. At most 30 words.";
+  const syntheticCatalog = SOURCE_CATALOG;
+  const prompts = PROMPTS;
+  const changedPrompt = CHANGED_PROMPT;
   async function persist() {
     await writeFile(
       join(evidence, "usage-ledger.json"),
@@ -95,7 +92,7 @@ try {
     );
   }
 
-  async function generate(stageId, body, scenario) {
+  async function generate(stageId, body, scenario, dependencies, prompt) {
     for (let attempt = 1; attempt <= RETRY_POLICY.maxAttemptsPerStage; attempt++) {
       // Leave worst-case headroom for every still-required successful capture.
       try {
@@ -162,7 +159,6 @@ try {
           .join("");
         if (candidate?.finishReason !== "STOP" || !text?.trim())
           throw new Error("Response was blocked, truncated, or empty. No retry.");
-        entry.status = "completed";
         const snapshot = {
           requestHash: entry.requestHash,
           modelVersion: value.modelVersion,
@@ -178,6 +174,9 @@ try {
           join(evidence, `${scenario}-${stageId}-response.json`),
           JSON.stringify(value, null, 2),
         );
+        failureOrigin = "grounding_validation";
+        validateStageOutput(stageId, text, dependencies, prompt);
+        entry.status = "completed";
         completedCaptures++;
         return snapshot;
       } catch (error) {
@@ -256,6 +255,7 @@ try {
     await mkdir(join(root, "prompts"), { recursive: true });
     await mkdir(join(root, "snapshots"));
     await copyFile(join(import.meta.dirname, "adapter.mjs"), join(root, "adapter.mjs"));
+    await copyFile(join(import.meta.dirname, "grounding.mjs"), join(root, "grounding.mjs"));
     await writeFile(join(root, "catalog.json"), canonicalizeJson(syntheticCatalog));
     await writeFile(join(root, "settings.json"), canonicalizeJson(SETTINGS));
     for (const [id] of GRAPH.slice(1)) {
@@ -302,16 +302,17 @@ try {
         continue;
       }
       if (stageId === "catalog") {
-        outputs.catalog = JSON.parse(await readFile(join(root, "catalog.json"), "utf8"));
+        outputs.catalog = validateCatalog(
+          JSON.parse(await readFile(join(root, "catalog.json"), "utf8")),
+        );
         continue;
       }
       const dependencyIds = GRAPH.find(([id]) => id === stageId)[1];
       const dependencies = Object.fromEntries(dependencyIds.map((id) => [id, outputs[id]]));
-      const body = requestBody(
-        await readFile(join(root, "prompts", `${stageId}.txt`), "utf8"),
-        dependencies,
-      );
-      const snapshot = await generate(stageId, body, scenario);
+      validateStageInputs(stageId, dependencies);
+      const prompt = await readFile(join(root, "prompts", `${stageId}.txt`), "utf8");
+      const body = requestBody(prompt, dependencies);
+      const snapshot = await generate(stageId, body, scenario, dependencies, prompt);
       await writeFile(join(root, "snapshots", `${stageId}.json`), canonicalizeJson(snapshot));
       outputs[stageId] = outputFromSnapshot(snapshot, body);
     }
@@ -459,6 +460,7 @@ try {
     }
     const report = {
       status: "completed",
+      exampleVersion: EXAMPLE_VERSION,
       ...failureSummary(),
       usageComplete: ledger.every((entry) => entry.usage !== null),
       savingsAreKnownUsageOnly: ledger.some((entry) => entry.usage === null),
@@ -483,6 +485,7 @@ try {
     await persist();
     const report = {
       status: "incomplete",
+      exampleVersion: EXAMPLE_VERSION,
       ...failureSummary(error),
       settings: SETTINGS,
       measurements,

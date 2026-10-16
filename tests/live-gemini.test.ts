@@ -15,7 +15,24 @@ async function fixture(fastRetries = false, capUsd = 0.1, modelProfile = "flash"
   const root = await mkdtemp(join(tmpdir(), "abilitybench-gemini-offline-"));
   roots.push(root);
   const sdk = pathToFileURL(resolve("dist/index.js")).href;
-  for (const name of ["adapter.mjs", "run.mjs"]) {
+  // Shared deterministic fake provider answers satisfy the stricter example contract.
+  await writeFile(
+    join(root, "mock-provider.mjs"),
+    `
+    globalThis.mockText=(options)=>{
+      const text=JSON.parse(options.body).contents[0].parts[0].text;
+      const stage=text.match(/^\\[([a-z]+)\\]/)[1];
+      const deps=JSON.parse(text.split('\\n\\nDeclared dependency outputs:\\n')[1]);
+      const c=deps.catalog;
+      if(stage==='facts')return JSON.stringify({budgetUsd:c.budgetUsd,teamSize:c.teamSize,dailyTickets:c.dailyTickets,humanReviewRequired:Object.keys(c.options).filter(id=>c.options[id].humanReview==='required').sort()});
+      if(stage==='options')return Object.entries(c.options).map(([id,o])=>id+': '+String.fromCharCode(36)+o.priceUsd+' monthly; '+o.mode+'; human review '+o.humanReview+'.').join('\\n');
+      if(stage==='risks')return 'A: Hypothesis: manual tagging may slow handling.\\nB: Hypothesis: human review could bottleneck triage.';
+      if(stage==='report')return text.includes('labelled Proposed')?'Recommend Option A: budget fit. Proposed safeguard: review escalations daily.':'Recommend Option A: its source price fits the budget.';
+      return deps.report.text.includes('Proposed')?'Recommend Option A for budget fit; proposed daily escalation review.':'Recommend Option A for budget fit.';
+    };
+  `,
+  );
+  for (const name of ["adapter.mjs", "run.mjs", "grounding.mjs"]) {
     const source = await readFile(resolve("examples/live-gemini", name), "utf8");
     let imported = source
       .replace('"../../dist/index.js"', JSON.stringify(sdk))
@@ -27,6 +44,7 @@ async function fixture(fastRetries = false, capUsd = 0.1, modelProfile = "flash"
         .replace("cachedInputPerMillion: 0.03,", "cachedInputPerMillion: 0.075,")
         .replace("outputPerMillion: 2.5,", "outputPerMillion: 3.75,");
     }
+    if (name === "run.mjs") imported = `import "./mock-provider.mjs";\n${imported}`;
     await writeFile(
       join(root, name),
       fastRetries && name === "run.mjs"
@@ -38,6 +56,112 @@ async function fixture(fastRetries = false, capUsd = 0.1, modelProfile = "flash"
 }
 
 describe("live Gemini adapter offline guardrails", () => {
+  it("checks explicit source/facts inputs and rejects known unsupported assumptions without requiring matching prose", async () => {
+    const root = await fixture();
+    const module = pathToFileURL(join(root, "grounding.mjs")).href;
+    const adapter = pathToFileURL(join(root, "adapter.mjs")).href;
+    await writeFile(
+      join(root, "grounding-checks.mjs"),
+      `
+      import assert from 'node:assert/strict';
+      import {SOURCE_CATALOG,expectedFacts,validateCatalog,validateFacts,validateStageInputs,validateStageOutput,PROMPTS,CHANGED_PROMPT} from ${JSON.stringify(module)};
+      import {GRAPH,requestBody,Budget,buildWorkflow} from ${JSON.stringify(adapter)};
+      const c=structuredClone(SOURCE_CATALOG);const facts={text:JSON.stringify(expectedFacts(c))};const deps={catalog:c,facts};
+      for(const id of ['options','risks'])assert.deepEqual(GRAPH.find(([name])=>name===id)[1],['catalog','facts']);
+      assert.throws(()=>validateStageInputs('options',{facts}),/catalog/);
+      assert.throws(()=>validateStageInputs('risks',{catalog:c}),/facts/);
+      const incomplete=structuredClone(c);delete incomplete.options.B.priceUsd;assert.throws(()=>validateCatalog(incomplete),/incomplete option/);
+      assert.throws(()=>validateFacts(JSON.stringify({...expectedFacts(c),budgetUsd:999}),c),/budgetUsd/);
+      assert.throws(()=>validateFacts(JSON.stringify({...expectedFacts(c),humanReviewRequired:[]}),c),/review/);
+      assert.throws(()=>validateFacts('plain invented facts',c),/strict JSON/);
+      assert.throws(()=>validateFacts(JSON.stringify({...expectedFacts(c),capacity:'sufficient'}),c),/unexpected/);
+      const good='A: $20 monthly; manual tags; human review unspecified.\\nB: $60 monthly; automated triage; human review required.';
+      validateStageOutput('options',good,deps,PROMPTS.options);
+      assert.throws(()=>validateStageOutput('options',good.replace('$60','$90'),deps,PROMPTS.options),/price/);
+      assert.throws(()=>validateStageOutput('options',good.replace('human review unspecified','no human review'),deps,PROMPTS.options),/no-review/);
+      assert.throws(()=>validateStageOutput('options',good.replace('human review required','human review required; no human review'),deps,PROMPTS.options),/no-review/);
+      const changed=structuredClone(c);changed.options.A.priceUsd=30;
+      assert.throws(()=>validateStageOutput('options',good,{catalog:changed,facts},PROMPTS.options),/price/);
+      validateStageOutput('options',good.replace('$20','$30'),{catalog:changed,facts},PROMPTS.options);
+      validateStageOutput('risks','A: Hypothesis: manual tags may slow handling.\\nB: Hypothesis: review could delay triage.',deps,PROMPTS.risks);
+      assert.throws(()=>validateStageOutput('risks','A: Burnout is inevitable.\\nB: Review causes bottlenecks.',deps,PROMPTS.risks),/hypothesis/);
+      const reportDeps={catalog:c,options:{text:good},risks:{text:'Hypotheses'}};
+      validateStageOutput('report','Recommend Option A: budget fit. Proposed safeguard: review daily escalations.',reportDeps,CHANGED_PROMPT);
+      validateStageOutput('report','Recommend Option B: source price fits budget. Proposed safeguard: weekly human audit.',reportDeps,CHANGED_PROMPT);
+      assert.throws(()=>validateStageOutput('report','Recommend Option A. Proposed safeguard: audit automated responses weekly.',reportDeps,CHANGED_PROMPT),/automated responses/);
+      assert.throws(()=>validateStageOutput('report','Recommend Option A: prevents burnout. Proposed safeguard: review daily.',reportDeps,CHANGED_PROMPT),/guaranteed/);
+      assert.throws(()=>validateStageOutput('report','Recommend Option A: fits team capacity. Proposed safeguard: review daily.',reportDeps,CHANGED_PROMPT),/capacity/);
+      assert.throws(()=>validateStageOutput('report','Recommend Option A for budget fit.',reportDeps,CHANGED_PROMPT),/proposed/);
+      assert.throws(()=>validateStageOutput('summary',Array(21).fill('word').join(' '),{catalog:c,report:{text:'source'}},PROMPTS.summary),/word limit/);
+      const parent={catalog:c,report:{text:'Recommend Option B for budget fit. Proposed safeguard: review daily.'}};
+      validateStageOutput('summary','Recommend Option B; proposed daily review.',parent,PROMPTS.summary);
+      assert.throws(()=>validateStageOutput('summary','Recommend Option A; proposed daily review.',parent,PROMPTS.summary),/option/);
+      assert.throws(()=>validateStageOutput('summary','Recommend Option B; daily review.',parent,PROMPTS.summary),/proposal status/);
+      assert.throws(()=>validateStageOutput('summary','Recommend Option B; proposed weekly review.',parent,PROMPTS.summary),/cadence/);
+      assert.throws(()=>validateStageOutput('summary','Recommend Option B; proposed 5% review.',parent,PROMPTS.summary),/number/);
+      const workflow=await buildWorkflow(${JSON.stringify(root)},{localCatalogLookupCalls:0,providerToolCalls:0});
+      assert.equal(workflow.id,'live-gemini-source-grounded-v2');
+      for(const stage of workflow.stages)assert.ok(stage.watchedPaths.some(path=>path.endsWith('grounding.mjs')));
+      const body=requestBody(PROMPTS.options,deps);const request=JSON.parse(body.contents[0].parts[0].text.split('\\n\\nDeclared dependency outputs:\\n')[1]);assert.deepEqual(request.catalog,c);assert.deepEqual(request.facts,facts);new Budget().reserve(body);
+    `,
+    );
+    const result = spawnSync(process.execPath, [join(root, "grounding-checks.mjs")], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  it("rejects missing source information before any provider dispatch", async () => {
+    const root = await fixture();
+    await writeFile(
+      join(root, "missing-source.mjs"),
+      `process.env.GEMINI_API_KEY='offline-key';const {SOURCE_CATALOG}=await import('./grounding.mjs');delete SOURCE_CATALOG.options.B.priceUsd;let calls=0;globalThis.fetch=()=>{calls++;throw new Error('must not dispatch');};await import('./run.mjs');if(calls!==0)throw new Error('paid call with missing source');`,
+    );
+    const result = spawnSync(process.execPath, [join(root, "missing-source.mjs")], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    expect(result.status).toBe(1);
+    const name = (await readdir(join(root, ".abilitybench"))).find((name) =>
+      name.startsWith("experiment-"),
+    );
+    const report = JSON.parse(
+      await readFile(join(root, ".abilitybench", name ?? "missing", "results.json"), "utf8"),
+    );
+    expect(report.finalFailure.origin).toBe("grounding_validation");
+    expect(report.knownUsageEstimatedCostUsd).toBe(0);
+    expect(report.executionResults).toEqual([]);
+  });
+
+  it("retains measured cost and raw response when a generated claim fails grounding, without completing a run", async () => {
+    const root = await fixture();
+    await writeFile(
+      join(root, "unsupported.mjs"),
+      `process.env.GEMINI_API_KEY='offline-key';let calls=0;globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({modelVersion:'mock',candidates:[{finishReason:'STOP',content:{parts:[{text:'Invented facts.'}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:130}}),{status:200});};await import('./run.mjs');if(calls!==1)throw new Error('quality failure retried');`,
+    );
+    const result = spawnSync(process.execPath, [join(root, "unsupported.mjs")], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    expect(result.status).toBe(1);
+    const name = (await readdir(join(root, ".abilitybench"))).find((name) =>
+      name.startsWith("experiment-"),
+    );
+    const evidence = join(root, ".abilitybench", name ?? "missing");
+    const report = JSON.parse(await readFile(join(evidence, "results.json"), "utf8"));
+    expect(report.status).toBe("incomplete");
+    expect(report.finalFailure.origin).toBe("grounding_validation");
+    expect(report.providerFailures).toEqual([]);
+    expect(report.abilityBenchFailures).toEqual([]);
+    expect(report.knownUsageEstimatedCostUsd).toBeGreaterThan(0);
+    expect(report.unknownUsageAttempts).toBe(0);
+    expect(report.executionResults).toEqual([]);
+    expect(await readdir(evidence)).toContain("baseline-facts-response.json");
+    const ledger = JSON.parse(await readFile(join(evidence, "usage-ledger.json"), "utf8"));
+    expect(ledger.ledger[0].status).toBe("failed");
+    expect(ledger.ledger[0].usage).not.toBeNull();
+  });
   it("runs the unchanged 5/2/5 protocol with Lite pricing and retains historical Flash exposure", async () => {
     const root = await fixture(false, 0.11, "lite");
     await mkdir(join(root, ".abilitybench", "experiment-flash"), { recursive: true });
@@ -52,8 +176,25 @@ describe("live Gemini adapter offline guardrails", () => {
       join(root, "lite.mjs"),
       `
       process.env.GEMINI_API_KEY='offline-key';let calls=0;
-      globalThis.fetch=async(url,options)=>{if(!url.endsWith('/gemini-3.5-flash-lite:generateContent'))throw new Error('wrong model');const body=JSON.parse(options.body);if(body.generationConfig.maxOutputTokens!==1024||body.generationConfig.thinkingConfig.thinkingLevel!=='LOW')throw new Error('changed allowances');calls++;return new Response(JSON.stringify({modelVersion:'mock-lite',candidates:[{finishReason:'STOP',content:{parts:[{text:'Answer '+calls}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:130}}),{status:200});};
+      globalThis.fetch=async(url,options)=>{if(!url.endsWith('/gemini-3.5-flash-lite:generateContent'))throw new Error('wrong model');const body=JSON.parse(options.body);if(body.generationConfig.maxOutputTokens!==1024||body.generationConfig.thinkingConfig.thinkingLevel!=='LOW')throw new Error('changed allowances');calls++;return new Response(JSON.stringify({modelVersion:'mock-lite',candidates:[{finishReason:'STOP',content:{parts:[{text:globalThis.mockText(options)}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:130}}),{status:200});};
       await import('./run.mjs');if(calls!==12||process.exitCode)throw new Error('protocol failed');
+      const {readFile,readdir,writeFile}=await import('node:fs/promises');
+      const {buildWorkflow}=await import('./adapter.mjs');
+      const {planWorkflowRun} = await import(${JSON.stringify(pathToFileURL(resolve("dist/index.js")).href)});
+      const name=(await readdir(new URL('./.abilitybench/',import.meta.url))).find(name=>name.startsWith('experiment-')&&name!=='experiment-flash');
+      const evidence=new URL('./.abilitybench/'+name+'/',import.meta.url);
+      const report=JSON.parse(await readFile(new URL('results.json',evidence),'utf8'));
+      const baselineRoot=new URL('baseline/',evidence);const {fileURLToPath}=await import('node:url');
+      const workflow=await buildWorkflow(fileURLToPath(baselineRoot),{localCatalogLookupCalls:0,providerToolCalls:0});
+      const options={inputs:{},baseline:{runId:report.measurements[0].runId}};
+      const catalogPath=new URL('catalog.json',baselineRoot);const original=await readFile(catalogPath,'utf8');
+      const catalog=JSON.parse(original);catalog.options.A.priceUsd=30;await writeFile(catalogPath,JSON.stringify(catalog));
+      const changed=await planWorkflowRun(workflow,options);
+      if(changed.plan.decisions.some(stage=>stage.decision!=='execute'))throw new Error('source change incorrectly reused');
+      await writeFile(catalogPath,original);
+      const helperPath=new URL('grounding.mjs',baselineRoot);await writeFile(helperPath,(await readFile(helperPath,'utf8'))+'\\n// Changed grounding contract.\\n');
+      const helperChanged=await planWorkflowRun(workflow,options);
+      if(helperChanged.plan.decisions.some(stage=>stage.decision!=='execute'))throw new Error('grounding helper change incorrectly reused');
     `,
     );
     const result = spawnSync(process.execPath, [join(root, "lite.mjs")], {
@@ -133,7 +274,7 @@ describe("live Gemini adapter offline guardrails", () => {
       join(root, "recovery.mjs"),
       `
       process.env.GEMINI_API_KEY='offline-key'; let calls=0;
-      globalThis.fetch=async()=>{calls++; if(calls===1)return new Response(JSON.stringify({error:{status:'UNAVAILABLE',message:'High demand.'}}),{status:503,headers:{'Retry-After':'2'}});return new Response(JSON.stringify({modelVersion:'mock',candidates:[{finishReason:'STOP',content:{parts:[{text:'Answer '+calls}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:130}}),{status:200});};
+      globalThis.fetch=async(url,options)=>{calls++; if(calls===1)return new Response(JSON.stringify({error:{status:'UNAVAILABLE',message:'High demand.'}}),{status:503,headers:{'Retry-After':'2'}});return new Response(JSON.stringify({modelVersion:'mock',candidates:[{finishReason:'STOP',content:{parts:[{text:globalThis.mockText(options)}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:130}}),{status:200});};
       await import('./run.mjs'); if(calls!==13||process.exitCode)throw new Error('recovery failed');
     `,
     );
@@ -292,7 +433,7 @@ describe("live Gemini adapter offline guardrails", () => {
     );
     await writeFile(
       join(root, "engine-failure.mjs"),
-      `process.env.GEMINI_API_KEY='offline-key';globalThis.fetch=async()=>new Response(JSON.stringify({modelVersion:'mock',candidates:[{finishReason:'STOP',content:{parts:[{text:'Short answer'}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:130}}),{status:200});await import('./run.mjs');`,
+      `process.env.GEMINI_API_KEY='offline-key';globalThis.fetch=async(url,options)=>new Response(JSON.stringify({modelVersion:'mock',candidates:[{finishReason:'STOP',content:{parts:[{text:globalThis.mockText(options)}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:130}}),{status:200});await import('./run.mjs');`,
     );
     const result = spawnSync(process.execPath, [join(root, "engine-failure.mjs")], {
       encoding: "utf8",
@@ -417,7 +558,7 @@ describe("live Gemini adapter offline guardrails", () => {
       globalThis.fetch = async (url, options) => {
         if (url !== 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent' || options.headers['x-goog-api-key'] !== process.env.GEMINI_API_KEY) throw new Error('unexpected request/model');
         calls++;
-        return new Response(JSON.stringify({ modelVersion: 'mock-gemini-version', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: 'Synthetic answer number ' + calls }] } }], usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, thoughtsTokenCount: 10, totalTokenCount: 130 } }), { status: 200 });
+        return new Response(JSON.stringify({ modelVersion: 'mock-gemini-version', candidates: [{ finishReason: 'STOP', content: { parts: [{ text: globalThis.mockText(options) }] } }], usageMetadata: { promptTokenCount: 100, candidatesTokenCount: 20, thoughtsTokenCount: 10, totalTokenCount: 130 } }), { status: 200 });
       };
       await import('./run.mjs');
       if (calls !== 12 || process.exitCode) throw new Error('protocol failed');
@@ -488,7 +629,7 @@ describe("live Gemini adapter offline guardrails", () => {
       join(root, "reconciled.mjs"),
       `
       process.env.GEMINI_API_KEY='offline-key'; let calls=0;
-      globalThis.fetch=async()=>{calls++;return new Response(JSON.stringify({modelVersion:'mock',candidates:[{finishReason:'STOP',content:{parts:[{text:'Short answer '+calls}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:130}}),{status:200});};
+      globalThis.fetch=async(url,options)=>{calls++;return new Response(JSON.stringify({modelVersion:'mock',candidates:[{finishReason:'STOP',content:{parts:[{text:globalThis.mockText(options)}]}}],usageMetadata:{promptTokenCount:100,candidatesTokenCount:20,thoughtsTokenCount:10,totalTokenCount:130}}),{status:200});};
       await import('./run.mjs'); if(calls!==12||process.exitCode)throw new Error('retry failed');
     `,
     );

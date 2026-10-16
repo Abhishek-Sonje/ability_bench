@@ -2,6 +2,12 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { canonicalizeJson, defineWorkflow } from "../../dist/index.js";
+import {
+  EXAMPLE_VERSION,
+  validateCatalog,
+  validateStageInputs,
+  validateStageOutput,
+} from "./grounding.mjs";
 
 export const SETTINGS = Object.freeze({
   model: "gemini-3.5-flash-lite",
@@ -18,10 +24,10 @@ export const PRICING = Object.freeze({
 export const GRAPH = Object.freeze([
   ["catalog", []],
   ["facts", ["catalog"]],
-  ["options", ["facts"]],
-  ["risks", ["facts"]],
-  ["report", ["options", "risks"]],
-  ["summary", ["report"]],
+  ["options", ["catalog", "facts"]],
+  ["risks", ["catalog", "facts"]],
+  ["report", ["catalog", "options", "risks"]],
+  ["summary", ["catalog", "report"]],
 ]);
 export function digest(value) {
   return `sha256:${createHash("sha256").update(canonicalizeJson(value)).digest("hex")}`;
@@ -261,31 +267,40 @@ export class Budget {
 }
 
 export async function buildWorkflow(root, toolMetrics) {
-  const builder = defineWorkflow({ id: "live-gemini-validation", root });
+  const builder = defineWorkflow({ id: `live-gemini-${EXAMPLE_VERSION}`, root });
   for (const [id, dependencies] of GRAPH) {
     builder.stage({
       id,
       dependsOn: dependencies,
-      implementation: `snapshot-${id}-v1`,
+      implementation: `snapshot-${id}-${EXAMPLE_VERSION}`,
       inputs: [],
       env: [],
       cache: true,
       watch:
         id === "catalog"
-          ? ["adapter.mjs", "catalog.json"]
-          : ["adapter.mjs", "settings.json", `prompts/${id}.txt`, `snapshots/${id}.json`],
+          ? ["adapter.mjs", "grounding.mjs", "catalog.json"]
+          : [
+              "adapter.mjs",
+              "grounding.mjs",
+              "settings.json",
+              `prompts/${id}.txt`,
+              `snapshots/${id}.json`,
+            ],
       run: async ({ dependencies: outputs }) => {
         if (id === "catalog") {
           const value = JSON.parse(await readFile(join(root, "catalog.json"), "utf8"));
           toolMetrics.localCatalogLookupCalls++;
-          return value;
+          return validateCatalog(value);
         }
         const prompt = await readFile(join(root, "prompts", `${id}.txt`), "utf8");
         const snapshot = JSON.parse(await readFile(join(root, "snapshots", `${id}.json`), "utf8"));
         const settings = JSON.parse(await readFile(join(root, "settings.json"), "utf8"));
         if (canonicalizeJson(settings) !== canonicalizeJson(SETTINGS))
           throw new Error("Loaded settings differ from declared request settings.");
-        return outputFromSnapshot(snapshot, requestBody(prompt, outputs));
+        validateStageInputs(id, outputs);
+        const output = outputFromSnapshot(snapshot, requestBody(prompt, outputs));
+        validateStageOutput(id, output.text, outputs, prompt);
+        return output;
       },
     });
   }
