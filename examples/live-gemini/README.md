@@ -2,7 +2,7 @@
 
 This experiment uses the existing engine unchanged. No SDK provider integration, replay feature, cloud service, UI, or cost-tracking subsystem is added.
 
-The original live milestone is [closed with its measured evidence and limitations](../../docs/live-validation-closure.md). This working example is now **source-grounded v2**, a separate offline-verified revision requiring a fresh baseline. It has not been run live. See [v2 source contracts, deterministic checks, and invalidation rules](../../docs/live-gemini-grounding-v2.md). Historical evidence and the original results remain unchanged.
+The original live milestone is [closed with its measured evidence and limitations](../../docs/live-validation-closure.md). This working example is now **source-grounded v2**, a separate revision requiring a fresh baseline. Its [single controlled live attempt](../../docs/live-gemini-v2-results.md) stopped at the strict facts-JSON gate on a Markdown-fenced response; no implementation or checks were changed to force a pass. See [v2 source contracts, deterministic checks, and invalidation rules](../../docs/live-gemini-grounding-v2.md). Historical evidence and the original results remain unchanged.
 
 ## Contract and design
 

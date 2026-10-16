@@ -1,6 +1,6 @@
 # Source-grounded live example v2
 
-Status: offline verified; not live validated. The [original live milestone is closed](./live-validation-closure.md), with its evidence and limitations preserved. V2 is a separate example revision, not a correction of historical outputs.
+Status: offline verified; the [single controlled V2 live attempt](./live-gemini-v2-results.md) stopped at the strict facts-JSON gate because Gemini returned a Markdown-fenced object. No baseline/candidate/control protocol completed. The [original live milestone is closed](./live-validation-closure.md), with its evidence and limitations preserved. V2 is a separate example revision, not a correction of historical outputs.
 
 ## Explicit source flow
 
@@ -54,6 +54,6 @@ Offline tests cover valid and missing catalog/facts inputs, contradictory source
 
 The complete Windows quality gate passes with 212 active tests and one existing POSIX-only skip. No `src/` engine files were changed. The three historical manifests and 18 stage artifacts remain verified; existing experiment trees are unchanged during read-only verification.
 
-Ready for another controlled validation **after explicit approval**, a fresh baseline, and confirmation of provider pricing/settings at that time. No live requests were made for this revision. Under the configured rates, retained exposure is still $0.03335395, leaving $0.07664605 headroom; 12 worst-case Lite attempts reserve $0.0454656, or $0.056832 for all 15 allowed attempts. No budget reset is involved.
+The offline readiness assessment was followed by one explicitly approved live attempt, documented above. It stopped at a strict output-format mismatch; another paid validation should wait for a separately approved provider-format contract revision and its offline tests, not relaxed grounding. The pre-run exposure/headroom were $0.03335395/$0.07664605; after the failed known-usage capture they are $0.03352405/$0.07647595. Under the unchanged configured rates, 12 worst-case Lite attempts reserve $0.0454656, or $0.056832 for all 15 allowed attempts. No budget reset is involved.
 
 Passing the bounded gates is not a general factuality or semantic-equivalence proof. Lexical rules can miss paraphrases or reject defensible wording; source grounding does not prove policy effectiveness or team capacity. A real response may stop on formatting, grounding, token envelope, provider, time, or budget guards. Such failures should remain evidence, not trigger relaxed criteria or an automatic new experiment.

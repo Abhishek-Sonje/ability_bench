@@ -2,7 +2,7 @@
 
 ## Status
 
-**Milestone closed on 2026-10-16.** See the [closure record](./live-validation-closure.md) for the accepted execution evidence and unresolved quality/equivalence limitations. The [source-grounded v2 example](./live-gemini-grounding-v2.md) is separately revised and offline verified; it has not been live run and does not replace the historical evidence below.
+**V1 milestone closed on 2026-10-16.** See the [closure record](./live-validation-closure.md) for the accepted execution evidence and unresolved quality/equivalence limitations. The separately revised [source-grounded v2 example](./live-gemini-grounding-v2.md) had [one controlled live attempt](./live-gemini-v2-results.md), which stopped on Markdown-fenced facts at its strict JSON gate. No V2 incremental or quality-regression result is claimed; historical V1 evidence below remains unchanged.
 
 The complete live Flash-Lite protocol passed with 5/2/5 successful API calls, four verified reused stages, and no provider, engine, adapter, or budget failures. See [the measured results](./live-gemini-lite-results.md) for usage, output differences, immutable lineage, and interpretation limits. This is one snapshot-adapter sample, not native stochastic-stage caching or a generalized cost/quality benchmark.
 

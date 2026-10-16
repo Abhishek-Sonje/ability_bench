@@ -7,8 +7,9 @@
 > The live validation milestone is closed: Flash-Lite completed the 5/2/5 protocol with verified
 > snapshot reuse and avoided calls. Outputs differed; this is not a quality-equivalence claim or
 > generalized savings benchmark. See `docs/live-validation-closure.md` and the preserved measured results.
-> The source-grounded v2 example is separately revised and offline verified; no new live request
-> is authorized by this revision. No new engine features or UI work are part of this work.
+> The source-grounded v2 example is separately revised and offline verified. Its single approved
+> live attempt stopped on Markdown-fenced facts at the strict JSON gate; no V2 incremental result
+> is claimed. See `docs/live-gemini-v2-results.md`. No automatic new experiment or engine/UI work follows.
 > The normative execution
 > contract is in `execution-contract.md`, verification and assessment are under `docs/`, and
 > Phase 1 currently means the narrow local CLI specified in `docs/phase-1-cli.md`. Those documents

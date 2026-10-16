@@ -202,7 +202,7 @@ The small live Gemini Flash-Lite experiment completed with 5 baseline calls, 2 i
 
 Not included: workflow editing, drag-and-drop, authentication, cloud execution, SQLite, tool replay, or production deployment. Publication and release work are deferred.
 
-The [live validation milestone is closed](./docs/live-validation-closure.md) with those limitations. A [source-grounded v2 example](./docs/live-gemini-grounding-v2.md) now supplies catalog and facts explicitly, adds bounded deterministic grounding checks, and requires a fresh baseline. V2 is offline verified only; no new live result is claimed.
+The [V1 live validation milestone is closed](./docs/live-validation-closure.md) with those limitations. A [source-grounded v2 example](./docs/live-gemini-grounding-v2.md) supplies catalog and facts explicitly and adds bounded deterministic grounding checks. Its [single controlled live attempt](./docs/live-gemini-v2-results.md) stopped on Markdown-fenced facts at the strict JSON gate, before a completed baseline; no V2 incremental or quality-regression result is claimed.
 
 ## Development
 
