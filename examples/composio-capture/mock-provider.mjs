@@ -41,7 +41,7 @@ export const MOCK_RESULT = {
   ],
   researchNotes: [],
 };
-export function mockTransport(scenario = "success") {
+export function mockTransport(scenario = "success", sourceUrl = SOURCE_URL) {
   let models = 0;
   let toolAttempts = 0;
   let synthesis = 0;
@@ -80,7 +80,7 @@ export function mockTransport(scenario = "success") {
           result = {
             action: fetchAction ? "fetch_url" : "search",
             query: "Salesforce official documentation",
-            url: SOURCE_URL,
+            url: sourceUrl,
             purpose: "Inspect official public evidence",
             reason: null,
           };
@@ -94,7 +94,7 @@ export function mockTransport(scenario = "success") {
             };
         } else if (schema?.properties?.apiSurface) {
           synthesis++;
-          result = structuredClone(MOCK_RESULT);
+          result = JSON.parse(JSON.stringify(MOCK_RESULT).replaceAll(SOURCE_URL, sourceUrl));
           if (scenario === "malformed" && synthesis === 1) result = "__MALFORMED__";
           if (scenario === "private-result") result.description = "Private user jane@example.com";
         } else {
@@ -122,7 +122,7 @@ export function mockTransport(scenario = "success") {
                 "accessModel",
                 "apiSurfaceRest",
               ].includes(key)
-                ? [SOURCE_URL]
+                ? [sourceUrl]
                 : [],
             ]),
           );
@@ -166,7 +166,7 @@ export function mockTransport(scenario = "success") {
         return response({
           data: {
             content: "OAuth 2.0. Free account. REST API. Salesforce official documentation.",
-            url: SOURCE_URL,
+            url: sourceUrl,
           },
           error: null,
           log_id: "mock-log",

@@ -2,6 +2,10 @@
 
 Status: **Steps 1 and 2 complete; live capture not approved.** See the [offline results](./composio-offline-results.md), [mocked capture results and remaining gates](./composio-capture-results.md), and [capture guide](../examples/composio-capture/README.md). No source-agent files were changed. Synthetic validation is [closed with its final adapter blocker](./live-gemini-v2-final-results.md).
 
+Step 3 planning is recorded in the [controlled live experiment plan](./composio-live-experiment-plan.md). Execution is blocked by the unbounded practical token profile, insufficient conservative reservation and remaining native-transport/account-pricing gates. No live requests or budget increase are authorized.
+
+Approved narrow preparation is recorded in the [bounded experiment safety report](./composio-safety-preparation.md). Offline guards and a conditional $0.06662080 profile are implemented; unresolved token/provider-cost/backend safety bounds keep the live entry point disabled. This is not approval or readiness for live execution.
+
 ## Preserve the existing agent
 
 Keep `src/index.ts` and `npm run research -- <app>` working unchanged. Reuse `researchApp`, `createGeminiResearchModel`, `createComposioResearchTools`, the Zod result schemas, evidence mapping, confidence policy, and unsupported-claim policy. The manual path uses `@google/genai` with `responseMimeType` / `responseJsonSchema`; do not transplant the failed synthetic REST configuration into it.

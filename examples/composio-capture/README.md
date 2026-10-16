@@ -2,6 +2,8 @@
 
 An opt-in example around the **existing** Composio research agent, not an engine feature or a new agent. No provider/framework code is added to `src/` or the public SDK. No dependencies are added. There is **no live mode** in this milestone.
 
+Follow-up: [bounded experiment preparation](../../docs/composio-safety-preparation.md) adds `experiment-mock` and an offline `live.mjs --preflight` command. Its authorization entry remains fail-closed: token/account/provider safety bounds are not yet verified. It is not an executable live runner; ordinary mock/CLI behavior below remains unchanged.
+
 ## Run only with mocked responses
 
 ```powershell

@@ -5,11 +5,12 @@ import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { prepareProject, sha256 } from "../composio-offline/prepare.mjs";
 import { captureResearch } from "./capture.mjs";
+import { EXPERIMENT, experimentPolicy, offlineExperiment } from "./experiment-profile.mjs";
 import { MOCK_POLICY, mockTransport } from "./mock-provider.mjs";
 
 const [mode, sourceArg, outputArg, scenario = "success"] = process.argv.slice(2);
 assert(
-  mode === "mock" || mode === "normal-cli-mock",
+  mode === "mock" || mode === "normal-cli-mock" || mode === "experiment-mock",
   "Step 2 supports mock capture or normal-cli-mock only. No live mode.",
 );
 assert(sourceArg && outputArg, "Usage: worker.mjs mock <source> <output> [scenario]");
@@ -61,17 +62,31 @@ assert(
   sdkVersions["@google/genai"] === "2.23.0" && sdkVersions["@composio/core"] === "0.18.1",
   "Audit SDK transport behavior before using a different installed version.",
 );
+sdkVersions["@composio/client"] = JSON.parse(
+  await readFile(join(source, "node_modules/@composio/client/package.json")),
+).version;
+assert(
+  sdkVersions["@composio/client"] === "0.1.0-alpha.76",
+  "Audit the underlying Composio client's retries before changing versions.",
+);
 registerHooks({
   resolve(specifier, context, next) {
     return next(sdkPaths[specifier] ?? specifier, context);
   },
 });
-const provider = mockTransport(scenario);
+const experiment =
+  mode === "experiment-mock"
+    ? offlineExperiment({ countCompleteInputTokens: () => 100 }) // Explicit mock oracle, NOT live token measurement.
+    : undefined;
+const provider = mockTransport(
+  scenario,
+  experiment ? "https://developer.salesforce.com/docs" : undefined,
+);
 const env = {
   GEMINI_API_KEY: "mock-gemini-credential",
   GEMINI_MODEL: "gemini-3.5-flash-lite",
   COMPOSIO_API_KEY: "mock-composio-credential",
-  MAX_RESEARCH_STEPS: "2",
+  MAX_RESEARCH_STEPS: experiment ? String(EXPERIMENT.steps) : "2",
 };
 if (mode === "normal-cli-mock") {
   globalThis.fetch = provider.fetch;
@@ -81,18 +96,27 @@ if (mode === "normal-cli-mock") {
   await import(pathToFileURL(join(project.root, "upstream/index.js")).href);
 } else {
   const capture = await captureResearch({
-    directory: join(output, "mock-budget"),
-    policy: { ...MOCK_POLICY, ...(scenario === "timeout" ? { attemptTimeoutMs: 25 } : {}) },
+    directory: join(output, experiment ? "experiment-mock-budget" : "mock-budget"),
+    policy: {
+      ...(experiment ? experimentPolicy() : MOCK_POLICY),
+      ...(scenario === "timeout" ? { attemptTimeoutMs: 25 } : {}),
+    },
+    experiment,
     transport: provider.fetch,
     secrets: [env.GEMINI_API_KEY, env.COMPOSIO_API_KEY],
-    approval: { allowPublicResult: true, allowedSourceOrigins: ["https://www.salesforce.com"] },
+    approval: {
+      allowPublicResult: true,
+      allowedSourceOrigins: [
+        experiment ? "https://developer.salesforce.com" : "https://www.salesforce.com",
+      ],
+    },
     metadata: {
       sourceHashes,
       sdkVersions,
       modelSettings: {
         model: env.GEMINI_MODEL,
-        maxResearchSteps: 2,
-        generation: "unchanged-agent-defaults",
+        maxResearchSteps: Number(env.MAX_RESEARCH_STEPS),
+        generation: experiment ? "bounded-experiment-v1" : "unchanged-agent-defaults",
       },
     },
     validateResult: (value) => {

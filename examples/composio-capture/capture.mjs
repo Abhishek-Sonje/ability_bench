@@ -22,6 +22,7 @@ const stopCodes = new Set([
   "closed",
   "persistence",
   "unfinished_requests",
+  "input_limit",
 ]);
 
 export class CaptureStop extends Error {
@@ -259,6 +260,7 @@ export async function captureResearch({
   approval,
   secrets = [],
   metadata = {},
+  experiment,
 }) {
   assert(!active, "Concurrent capture scopes in one process are forbidden.");
   const policy = policyOf(suppliedPolicy);
@@ -290,7 +292,7 @@ export async function captureResearch({
     assert(
       Object.entries(metadata.sdkVersions).every(
         ([name, version]) =>
-          ["@google/genai", "@composio/core"].includes(name) &&
+          ["@google/genai", "@composio/core", "@composio/client"].includes(name) &&
           /^[a-zA-Z0-9._-]{1,50}$/.test(version),
       ),
       "Invalid SDK provenance.",
@@ -301,7 +303,9 @@ export async function captureResearch({
         "generation,maxResearchSteps,model" &&
         /^[a-zA-Z0-9._-]{1,100}$/.test(metadata.modelSettings.model) &&
         safeInteger(metadata.modelSettings.maxResearchSteps) &&
-        metadata.modelSettings.generation === "unchanged-agent-defaults",
+        ["unchanged-agent-defaults", "bounded-experiment-v1"].includes(
+          metadata.modelSettings.generation,
+        ),
       "Invalid model provenance.",
     );
   assert(
@@ -396,10 +400,23 @@ export async function captureResearch({
       prior += await auditDirectory(path);
     }
     assert(prior <= nano(policy.capUsd), "Retained mock exposure already exceeds cap.");
+    if (experiment) {
+      const reservation = experiment.completeReservation(policy);
+      assert(safeInteger(reservation), "Invalid complete reservation.");
+      assert(
+        prior + reservation <= nano(policy.capUsd),
+        "Complete experiment reservation does not fit retained headroom.",
+      );
+    }
     root = join(directory, `capture-${randomUUID()}`);
     await mkdir(join(root, "events"), { recursive: true });
     const guardedFetch = async (input, init = {}) => {
       check();
+      // Reject Request objects rather than accidentally dropping their cancellation/body/headers.
+      if (input instanceof Request) {
+        fatal = new CaptureStop("unsafe_request");
+        throw fatal;
+      }
       const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
       if (
         url.origin === "https://registry.npmjs.org" &&
@@ -422,6 +439,14 @@ export async function captureResearch({
       } catch {
         fatal = new CaptureStop("unsafe_request");
         throw fatal;
+      }
+      if (experiment) {
+        try {
+          await bounded(experiment.inspectRequest(url, body, init, call), controller.signal);
+        } catch (error) {
+          fatal = error instanceof CaptureStop ? error : new CaptureStop("unsafe_request");
+          throw fatal;
+        }
       }
       const requestId = identity({ route: kind, path: url.pathname, body }); // No headers/query/API key persisted.
       const entry = await serialized(async () => {
@@ -485,9 +510,37 @@ export async function captureResearch({
       let structuredTextSyntax = "unavailable";
       try {
         check();
-        response = await bounded(transport(input, { ...init, signal }), signal);
+        if (signal.aborted) throw new CaptureStop("timeout");
+        response = await bounded(transport(input, { ...init, signal, redirect: "manual" }), signal);
         status = response.status;
-        const text = await bounded(response.clone().text(), signal);
+        if ((status >= 300 && status < 400) || response.redirected) {
+          void response.body?.cancel().catch(() => {});
+          throw new CaptureStop("unsafe_request");
+        }
+        const reader = response.body?.getReader();
+        const chunks = [];
+        let size = 0;
+        try {
+          while (reader) {
+            const { done, value } = await bounded(reader.read(), signal);
+            if (done) break;
+            size += value.byteLength;
+            if (size > policy.maxResponseBytes) throw new CaptureStop("request_limit");
+            chunks.push(Buffer.from(value));
+          }
+        } catch (error) {
+          void reader?.cancel().catch(() => {});
+          throw error;
+        }
+        const bytes = Buffer.concat(chunks);
+        const text = bytes.toString("utf8");
+        // SDK receives the original bytes and status after bounded consumption, never a clone tee.
+        response = new Response(bytes.length ? bytes : null, {
+          status,
+          statusText: response.statusText,
+          headers: response.headers,
+        });
+        if (experiment) experiment.inspectResponse(url, body, status, text);
         responseIdentity = identity({ text });
         if (Buffer.byteLength(text) > policy.maxResponseBytes)
           throw new CaptureStop("request_limit");
@@ -564,7 +617,9 @@ export async function captureResearch({
       });
       if (
         error instanceof CaptureStop &&
-        ["usage_overrun", "usage_invalid", "request_limit", "timeout"].includes(error.code)
+        ["usage_overrun", "usage_invalid", "request_limit", "timeout", "unsafe_request"].includes(
+          error.code,
+        )
       )
         fatal = error;
       if (error) throw error;
@@ -597,15 +652,20 @@ export async function captureResearch({
         client: {
           models: {
             generateContent: (request) =>
-              call("model", () =>
-                gemini.client.models.generateContent({
-                  ...request,
+              call("model", () => {
+                const configured = experiment ? experiment.configureRequest(request) : request;
+                return gemini.client.models.generateContent({
+                  ...configured,
                   config: {
-                    ...request.config,
-                    httpOptions: { ...request.config?.httpOptions, fetch: fetchBoundary },
+                    ...configured.config,
+                    httpOptions: {
+                      ...request.config?.httpOptions,
+                      ...(experiment ? { retryOptions: { attempts: 1 } } : {}),
+                      fetch: fetchBoundary,
+                    },
                   },
-                }),
-              ),
+                });
+              }),
           },
         },
       }),
