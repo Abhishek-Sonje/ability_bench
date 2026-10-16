@@ -4,6 +4,7 @@ import { cp, mkdir, mkdtemp, readdir, readFile, realpath, writeFile } from "node
 import { createRequire, stripTypeScriptTypes } from "node:module";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { readCapture } from "../composio-capture/capture.mjs";
 
 // A deliberately explicit example-specific source boundary, not engine dependency discovery.
 export const SOURCE_FILES = [
@@ -32,7 +33,7 @@ function outside(root, target) {
   return remainder === ".." || remainder.startsWith(`..${sep}`) || isAbsolute(remainder);
 }
 
-export async function prepareProject(source, resultFile, outputParent) {
+export async function prepareProject(source, resultFile, outputParent, options = {}) {
   source = await realpath(resolve(source));
   outputParent = resolve(outputParent);
   assert(outside(source, outputParent), "Adapter output must be outside the original project.");
@@ -50,7 +51,41 @@ export async function prepareProject(source, resultFile, outputParent) {
   assert(!["analysis.json", "research-dataset.json", "run-manifest.json"].includes(resultFile));
   const resultPath = await realpath(join(source, "results", resultFile));
   assert(!outside(source, resultPath), "Result escapes the source project.");
-  const resultBytes = await readFile(resultPath);
+  let resultBytes = await readFile(resultPath);
+  let captured = null;
+  if (options.capturePackage) {
+    captured = await readCapture(resolve(options.capturePackage));
+    assert(
+      captured.manifest.status === "completed" && captured.result,
+      "Only completed, explicitly exported captures can be adopted.",
+    );
+    const hashes = captured.manifest.sourceHashes;
+    const required = [
+      ...SOURCE_FILES.map((file) => `src/${file}`),
+      "src/agent/gemini-model.ts",
+      "src/agent/prompt.ts",
+      "src/agent/evidence-mapping.ts",
+    ];
+    assert(
+      Array.isArray(hashes) && required.every((file) => hashes.some(([name]) => name === file)),
+      "Capture lacks source provenance.",
+    );
+    for (const [file, hash] of hashes) {
+      assert(
+        /^src\/[a-zA-Z0-9/_.-]+\.ts$/.test(file) && !file.includes(".."),
+        "Unsafe source provenance.",
+      );
+      assert(
+        sha256(await readFile(join(source, file))) === hash,
+        "Captured and selected source implementations differ.",
+      );
+    }
+    assert(
+      captured.result.app === JSON.parse(resultBytes).app,
+      "Captured target differs from selected saved target.",
+    );
+    resultBytes = Buffer.from(JSON.stringify(captured.result));
+  }
   const contextPath = await realpath(join(source, "results/research-dataset.json"));
   assert(!outside(source, contextPath), "Dataset context escapes the source project.");
   const contextBytes = await readFile(contextPath);
@@ -91,15 +126,21 @@ export async function prepareProject(source, resultFile, outputParent) {
         upstreamHashes,
         dependencyTreeSha256: sha256(JSON.stringify(dependencyHashes)),
         importedAt: new Date().toISOString(),
-        acquisitionTime: null,
-        modelSettings: null,
+        acquisitionTime: captured?.manifest.completedAt ?? null,
+        modelSettings: captured?.manifest.modelSettings ?? null,
         observations: null,
-        note: "Existing saved result; original model settings, acquisition time, and raw observations are unavailable. Evidence URLs remain in the original result; this is not a fresh web observation.",
+        origin: captured ? "mock-capture" : "historical-saved-result",
+        captureManifestSha256: captured?.manifestSha256 ?? null,
+        note: captured
+          ? "Explicitly approved mock-capture export, not live research. Model settings and acquisition metadata describe the mock execution. Raw observations were intentionally not exported; approved source URLs remain in the result. Dataset context is unchanged historical research."
+          : "Existing saved result; original model settings, acquisition time, and raw observations are unavailable. Evidence URLs remain in the original result; this is not a fresh web observation.",
       },
       null,
       2,
     ),
   );
+  if (captured)
+    await writeFile(join(root, "capture/research-capture.json"), JSON.stringify(captured.manifest));
   const sdkUrl = new URL("../../dist/index.js", import.meta.url).href;
   for (const name of ["workflow.mjs", "evaluation.mjs"]) {
     const text = await readFile(new URL(name, import.meta.url), "utf8");

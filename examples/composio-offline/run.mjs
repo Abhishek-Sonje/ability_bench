@@ -12,7 +12,7 @@ import { openProject, prepareProject } from "./prepare.mjs";
 
 const [command, ...args] = process.argv.slice(2);
 const help =
-  "Usage: node examples/composio-offline/run.mjs prepare <source> <result.json> [output-parent] | run <project> <baseline-id|none> [--publish] | plan <project> <baseline-id|none>";
+  "Usage: node examples/composio-offline/run.mjs prepare <source> <result.json> [output-parent] | adopt <source> <result.json> <capture-package> [output-parent] | run <project> <baseline-id|none> [--publish] | plan <project> <baseline-id|none>";
 if (command === "prepare" && args.length >= 2 && args.length <= 3) {
   const project = await prepareProject(
     args[0],
@@ -20,6 +20,19 @@ if (command === "prepare" && args.length >= 2 && args.length <= 3) {
     args[2] ?? fileURLToPath(new URL(".abilitybench", import.meta.url)),
   );
   console.log(JSON.stringify(project, null, 2));
+} else if (command === "adopt" && args.length >= 3 && args.length <= 4) {
+  console.log(
+    JSON.stringify(
+      await prepareProject(
+        args[0],
+        args[1],
+        args[3] ?? fileURLToPath(new URL(".abilitybench", import.meta.url)),
+        { capturePackage: args[2] },
+      ),
+      null,
+      2,
+    ),
+  );
 } else if (
   (command === "run" || command === "plan") &&
   (args.length === 2 || (command === "run" && args.length === 3 && args[2] === "--publish"))

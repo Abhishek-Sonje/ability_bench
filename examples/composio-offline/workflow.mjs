@@ -76,6 +76,7 @@ export function build(root) {
       "capture/result.json",
       "capture/dataset-context.json",
       "capture/provenance.json",
+      "capture/research-capture.json",
     ]),
     run: async ({ inputs }) => {
       const text = await readFile(join(root, "capture/result.json"), "utf8");
@@ -85,6 +86,23 @@ export function build(root) {
         "Capture target/provenance mismatch.",
       );
       assert(hash(text) === provenance.resultSha256, "Capture bytes disagree with provenance.");
+      if (provenance.captureManifestSha256) {
+        const captureText = await readFile(join(root, "capture/research-capture.json"), "utf8");
+        assert(
+          hash(captureText) === provenance.captureManifestSha256,
+          "Capture manifest identity changed.",
+        );
+        const captured = JSON.parse(captureText);
+        assert(
+          captured.status === "completed" &&
+            captured.mode === "mock-only" &&
+            captured.exported === true &&
+            captured.files.some(
+              ([name, identity]) => name === "result.json" && identity === hash(text),
+            ),
+          "Capture result is not bound to its completed export.",
+        );
+      }
       const contextText = await readFile(join(root, "capture/dataset-context.json"), "utf8");
       assert(
         hash(contextText) === provenance.contextSha256,

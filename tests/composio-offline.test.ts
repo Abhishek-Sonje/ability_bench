@@ -70,6 +70,8 @@ beforeAll(async () => {
   }`,
   );
   await put(join(source, "src/pipeline/save-result.ts"), "export const unused = true;");
+  for (const name of ["gemini-model", "prompt", "evidence-mapping"])
+    await put(join(source, `src/agent/${name}.ts`), "export const provenanceFixture = true;");
   await put(
     join(source, "src/data/assessment-categories.ts"),
     "export const categories = ['Z', 'A'];",
@@ -139,6 +141,29 @@ function stage(name: string, id: string) {
 }
 
 describe("offline coarse agent adapter", () => {
+  it("adopts sealed mock capture evidence while retaining historical evaluation failures", async () => {
+    const destination = join(temporary, "capture-adoption");
+    const result = invoke(resolve("tests/fixtures/capture-exercise.mjs"), [
+      "adopt",
+      destination,
+      source,
+    ]);
+    expect(result.status, result.stderr).toBe(0);
+    const captured = JSON.parse(result.stdout);
+    expect(captured.adopted).toMatchObject({
+      executionStatus: "completed",
+      changedCaptureRejected: true,
+      provenance: { origin: "mock-capture" },
+      evaluation: { evaluationStatus: "failed", comparisonStatus: "no_regressions" },
+    });
+    expect(captured.adopted.provenance.captureManifestSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(captured.adopted.provenance.acquisitionTime).not.toBeNull();
+    expect(
+      captured.adopted.stages
+        .filter((stage: { executionStatus: string }) => stage.executionStatus === "reused")
+        .map((stage: { stageId: string }) => stage.stageId),
+    ).toEqual(["load-capture", "validate-result"]);
+  });
   it("declares the whole branch/join DAG with explicit dependencies", () => {
     const rows = outcome("baseline").manifest.stages;
     expect(rows.map(({ stageId }) => stageId)).toHaveLength(8);
