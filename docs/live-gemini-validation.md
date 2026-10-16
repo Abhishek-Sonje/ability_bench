@@ -2,13 +2,15 @@
 
 ## Status
 
+**Milestone closed on 2026-10-16.** See the [closure record](./live-validation-closure.md) for the accepted execution evidence and unresolved quality/equivalence limitations. The [source-grounded v2 example](./live-gemini-grounding-v2.md) is separately revised and offline verified; it has not been live run and does not replace the historical evidence below.
+
 The complete live Flash-Lite protocol passed with 5/2/5 successful API calls, four verified reused stages, and no provider, engine, adapter, or budget failures. See [the measured results](./live-gemini-lite-results.md) for usage, output differences, immutable lineage, and interpretation limits. This is one snapshot-adapter sample, not native stochastic-stage caching or a generalized cost/quality benchmark.
 
 Earlier Gemini 3.8 Flash attempts remain incomplete and preserved separately: provider HTTP 503 `UNAVAILABLE` responses identified high model demand. Their unknown-usage reservations remain counted; switching models did not reset cumulative exposure.
 
 Individual request logs and budget reservations stay in ignored local evidence under examples/live-gemini/.abilitybench/. They are not tracked as per-call reports. Explicit invocations carry reconciled exposure forward under the user-approved $0.11 estimated ceiling. Bounded HTTP 503 retries are supported within an invocation; no model substitutions are enabled.
 
-The adapter's offline tests pass. The full Windows quality gate passed with 209 active tests and one existing POSIX-only skip, including historical Flash guard regressions and the approved Lite profile. Mocked request counts are not live evidence. No engine, cloud, replay, or UI features were added.
+The adapter's offline tests pass. The current full Windows quality gate passes with 212 active tests and one existing POSIX-only skip, including historical Flash guard regressions, Lite budget coverage, and the revised source-grounding gates. Mocked request counts are not live evidence. No engine, cloud, replay, or UI features were added.
 
 ## Historical approved Flash attempt outcome
 

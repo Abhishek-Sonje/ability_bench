@@ -194,13 +194,15 @@ Workflow declarations + explicit inputs + immutable baseline
 
 ## Verification and current boundaries
 
-The latest recorded full local Windows quality gate passed **209 tests**, with one existing POSIX-only skip. CI is configured for Windows and Ubuntu; previously confirmed cross-platform CI covers the engine and evaluation CLI, not a newly claimed validation of every later milestone.
+The latest recorded full local Windows quality gate passed **212 tests**, with one existing POSIX-only skip. CI is configured for Windows and Ubuntu; previously confirmed cross-platform CI covers the engine and evaluation CLI, not a newly claimed validation of every later milestone.
 
 The independent usability exercise used a real Composio project not designed around AbilityBench. Its workflow-modeling, decision explanations, side-effect handling, and ordering checks passed. The read-only viewer was checked against retained histories and accepted by the user. See the [independent validation](./docs/independent-workflow-validation.md) and [viewer verification](./docs/phase-3-viewer-usage.md).
 
 The small live Gemini Flash-Lite experiment completed with 5 baseline calls, 2 incremental calls, and 5 full-control calls. The candidate reused four earlier stages, used 60% fewer API calls, and had 8.05% lower estimated API cost than the full changed-prompt control in this single sample. Outputs differed, and the incremental run cost more than the original baseline because prompts and thinking consumption differed. Its adapter captures immutable provider responses outside deterministic engine callbacks; it is not native caching of stochastic LLM execution or a quality-equivalence claim. Earlier Flash attempts stopped on provider availability errors and remain preserved. See the [measured results and limitations](./docs/live-gemini-lite-results.md).
 
 Not included: workflow editing, drag-and-drop, authentication, cloud execution, SQLite, tool replay, or production deployment. Publication and release work are deferred.
+
+The [live validation milestone is closed](./docs/live-validation-closure.md) with those limitations. A [source-grounded v2 example](./docs/live-gemini-grounding-v2.md) now supplies catalog and facts explicitly, adds bounded deterministic grounding checks, and requires a fresh baseline. V2 is offline verified only; no new live result is claimed.
 
 ## Development
 

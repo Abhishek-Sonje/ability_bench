@@ -2,17 +2,23 @@
 
 This experiment uses the existing engine unchanged. No SDK provider integration, replay feature, cloud service, UI, or cost-tracking subsystem is added.
 
+The original live milestone is [closed with its measured evidence and limitations](../../docs/live-validation-closure.md). This working example is now **source-grounded v2**, a separate offline-verified revision requiring a fresh baseline. It has not been run live. See [v2 source contracts, deterministic checks, and invalidation rules](../../docs/live-gemini-grounding-v2.md). Historical evidence and the original results remain unchanged.
+
 ## Contract and design
 
 Live Gemini responses are nondeterministic, even with fixed generation settings. They must **not** be presented as pure stage callbacks. This adapter first asks the engine for a plan; it captures new responses only for planned executing stages, then supplies those immutable snapshots as watched files to deterministic stage callbacks. Each snapshot includes the canonical request hash, resolved response model version and provider usage. Callbacks validate the request against explicit dependency outputs and return only the captured text. Baseline/candidate snapshots live in separate physical project roots; earlier snapshots are copied byte-for-byte, never regenerated for the candidate. Source, prompts, settings, adapter code, and relevant snapshot files are declared influences.
 
 This tests plan-directed incremental AI orchestration with explicit response snapshots. It does not prove that arbitrary live-provider functions are pure, that the engine natively integrates providers, or that new stochastic outputs would equal reused ones. That integration gap is part of the result, not hidden behind `cache: true`.
 
+V2 carries a structured source catalog to each model stage; options/risks also declare facts explicitly. Captures and callbacks enforce source/facts consistency, explicit option information, hypothesis labels, bounded unsupported-assumption patterns, and summary fidelity. Grounding failures retain measured usage and raw response evidence, are classified separately, and are not retried to obtain a pass. The checks are deliberately incomplete, not a general factuality evaluator, and never require candidate/control outputs to match.
+
 ```text
-catalog (local read tool / immutable synthetic input)
-  └── facts (Gemini)
-       ├── options (Gemini) ──┐
-       └── risks (Gemini) ────┴── report (Gemini) ── summary (Gemini)
+catalog <- no dependencies
+facts   <- catalog
+options <- catalog, facts
+risks   <- catalog, facts
+report  <- catalog, options, risks
+summary <- catalog, report
 ```
 
 One baseline has five Gemini requests and one local catalog lookup. Change only the report prompt; the incremental candidate must reuse catalog/facts/options/risks, execute report/summary, and issue exactly two Gemini requests with no catalog lookup. A full changed-prompt control issues five fresh requests and one catalog lookup, allowing measured—not projected—comparison with a full rerun. Both incremental and full control reference identical source/prompts/settings, but fresh upstream AI output may differ stochastically.
