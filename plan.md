@@ -16,7 +16,9 @@
 > `docs/composio-integration-plan.md`, not further synthetic-example expansion.
 > Step 1's separate offline adapter is now verified against real saved research, with ordering,
 > conservative reuse, isolated publication, and existing policy findings preserved. See
-> `docs/composio-offline-results.md`. Step 2/live capture has not started.
+> `docs/composio-offline-results.md`. Step 2's mocked capture boundary is now verified, including
+> per-attempt accounting, immutable private-by-default evidence, and explicit offline adoption.
+> See `docs/composio-capture-results.md`. Live capture remains disabled and unapproved.
 > The normative execution
 > contract is in `execution-contract.md`, verification and assessment are under `docs/`, and
 > Phase 1 currently means the narrow local CLI specified in `docs/phase-1-cli.md`. Those documents

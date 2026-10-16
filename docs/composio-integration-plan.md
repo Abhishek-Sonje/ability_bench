@@ -1,6 +1,6 @@
 # Real Composio research integration plan
 
-Status: **Step 1 complete; Step 2 not started; live capture not approved.** See the [offline results and remaining quality findings](./composio-offline-results.md) and [adapter guide](../examples/composio-offline/README.md). Based on inspection of the sibling `composio-agent` checkout on 2026-10-16; no files there were changed. Synthetic validation is [closed with its final adapter blocker](./live-gemini-v2-final-results.md).
+Status: **Steps 1 and 2 complete; live capture not approved.** See the [offline results](./composio-offline-results.md), [mocked capture results and remaining gates](./composio-capture-results.md), and [capture guide](../examples/composio-capture/README.md). No source-agent files were changed. Synthetic validation is [closed with its final adapter blocker](./live-gemini-v2-final-results.md).
 
 ## Preserve the existing agent
 
@@ -51,4 +51,4 @@ Reserve before **every underlying SDK attempt**, reconcile known usage, retain u
 3. **One approved real run:** one target, reviewed action/token/tool limits, cumulative reservation including all retries, isolated storage. Baseline captures research once; a report-only candidate must make zero new model/tool calls, retain identical research artifact hashes, and explain every decision. Verify existing source/evidence checks separately from execution status. A fresh live control is optional and requires its own budget approval; stochastic text equality is not an acceptance condition.
 4. **Only if real usage requires it:** expose the existing collection context and synthesis/mapping boundaries through small exported functions, preserving `researchApp` as a composition wrapper. This enables changing a synthesis prompt against the same declared evidence snapshot without repeating search/fetch. Preserve current prompts, policies, and outputs with tests first. It is an optional follow-up, not justification for rewriting the loop now.
 
-Step 1 and its offline tests are complete. The next proposed task is Step 2's mocked capture boundary, not live capture, another synthetic experiment, provider migration, workflow editor, cloud feature, SQLite layer, or generic tool replay system. Do not proceed automatically from Step 1.
+Steps 1 and 2 are complete. The next proposed task is to design one separately approved real-agent experiment, first verifying native transport safety, actual model token/rate/default settings, complete retry bounds, public-data export policy, Composio limits and cumulative exposure. The mock-only capture mode does not establish that real execution fits $0.11. Do not enable or execute live capture automatically, start another synthetic experiment, migrate providers, or add editor/cloud/SQLite/replay features.

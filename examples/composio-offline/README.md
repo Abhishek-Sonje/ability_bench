@@ -1,6 +1,6 @@
 # Offline integration of an existing research agent
 
-This adapter uses only AbilityBench's public SDK. It does not change the engine, add a provider dependency, call Gemini/Composio, read credentials, replay tools, or modify the sibling agent. The existing research CLI, prompts, SDK configuration, retries, and adaptive loop remain untouched. Step 2 (a guarded live capture boundary) is not implemented here.
+This adapter uses only AbilityBench's public SDK. It does not change the engine, add a provider dependency, call Gemini/Composio, read credentials, replay tools, or modify the sibling agent. The existing research CLI, prompts, SDK configuration, retries, and adaptive loop remain untouched. A separate [Step 2 mocked capture boundary](../composio-capture/README.md) can now produce explicitly approved immutable mock results for adoption; there is no live capture mode.
 
 ## Start
 
