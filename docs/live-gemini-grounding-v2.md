@@ -2,6 +2,8 @@
 
 Status: offline verified; the [single controlled V2 live attempt](./live-gemini-v2-results.md) stopped at the strict facts-JSON gate because Gemini returned a Markdown-fenced object. No baseline/candidate/control protocol completed. The [original live milestone is closed](./live-validation-closure.md), with its evidence and limitations preserved. V2 is a separate example revision, not a correction of historical outputs.
 
+The final planned attempt of the structured-output configuration subsequently stopped on HTTP 400 before any capture: the REST enum field rejected `"application/json"`. See the [final outcome and adapter root cause](./live-gemini-v2-final-results.md). Synthetic attempts are now closed; the next priority is [real Composio integration](./composio-integration-plan.md). Offline compatibility assertions below describe local mocks, not a successful endpoint contract.
+
 ## Explicit source flow
 
 Current workflow identity: `live-gemini-source-grounded-v2-json-v1`. The earlier failed attempt retains its original `live-gemini-source-grounded-v2` identity and evidence.
@@ -21,7 +23,7 @@ All stage inputs reach the provider through declared dependency outputs. There i
 
 ## Structured-output adapter contract
 
-The facts request now uses the existing REST endpoint's officially documented `generationConfig.responseFormat.text` with `mimeType: "application/json"` and a JSON Schema. See the [official REST example](https://ai.google.dev/gemini-api/docs/generate-content/structured-output) and [API reference](https://ai.google.dev/api/generate-content). Prose stages do not request JSON.
+The facts request uses `generationConfig.responseFormat.text` with `mimeType: "application/json"` and a JSON Schema, following the [REST guide example](https://ai.google.dev/gemini-api/docs/generate-content/structured-output). The live attempt exposed a conflicting [API reference](https://ai.google.dev/api/generate-content): this field is an enum requiring `APPLICATION_JSON`, not the MIME string. The current adapter is therefore not live-compatible as written; it is left unchanged as final-attempt evidence. Prose stages do not request JSON.
 
 The schema requires exactly `budgetUsd` (nonnegative number), `teamSize` and `dailyTickets` (positive integers), and `humanReviewRequired` (an array of option IDs A/B). Additional properties are forbidden. It describes structure, not the expected source answers. Local validation still parses the entire response strictly, checks types and exact source values, and rejects Markdown fences, extra claims, malformed/truncated output, and non-STOP completion. No normalization or validation relaxation is applied.
 
@@ -62,7 +64,7 @@ Offline tests cover valid and missing catalog/facts inputs, contradictory source
 
 The complete Windows quality gate passes with 222 active tests and one existing POSIX-only skip. Tests cover native request configuration, strict valid/fenced/missing/wrong-type/truncated JSON handling, unsupported claims, source contradictions, request binding, and unchanged budget settlement. No `src/` engine files were changed. All six retained experiment trees remain unchanged.
 
-The earlier live attempt stopped at a strict output-format mismatch. The structured-output revision is ready for one final controlled validation only after separate approval; no live requests were made while fixing it. The pre-run exposure/headroom were $0.03335395/$0.07664605; after the failed known-usage capture they are $0.03352405/$0.07647595. Under the unchanged configured rates, 12 worst-case Lite attempts reserve $0.0454656, or $0.056832 for all 15 allowed attempts. Combined exposure would be at most $0.09035605, leaving $0.01964395 beneath the $0.11 cap. No budget reset is involved.
+The earlier live attempt stopped at a strict output-format mismatch. The subsequent approved final attempt stopped at request validation, not generation; no further synthetic attempt is planned. Before that attempt exposure/headroom were $0.03352405/$0.07647595. They are now $0.03731285/$0.07268715 because the HTTP 400 had no usage metadata and retains its full reservation. Under the unchanged configured rates, the original 12-attempt reservation was $0.0454656, or $0.056832 for all 15 permitted attempts. No budget reset is involved.
 
 The initial facts request is 1,085 UTF-8 bytes, including the schema (440 bytes more than before). Representative valid downstream requests are at most 1,237 bytes, below the 2,048-byte limit. Future generated dependency text is unknown, so every actual request still passes the byte and token-reservation guards before dispatch; this offline check does not guarantee arbitrary generated text will fit. Output/thinking token allowances and usage reconciliation are unchanged. After this final controlled validation, prioritize real Composio integration rather than further synthetic-example expansion.
 

@@ -10,9 +10,10 @@
 > The source-grounded v2 example is separately revised and offline verified. Its single approved
 > live attempt stopped on Markdown-fenced facts at the strict JSON gate; no V2 incremental result
 > is claimed. See `docs/live-gemini-v2-results.md`. No automatic new experiment or engine/UI work follows.
-> A separate schema-constrained facts adapter is now offline verified with strict checks retained;
-> one final controlled validation awaits approval. Then prioritize real Composio integration,
-> not further synthetic-example expansion. See `docs/live-gemini-grounding-v2.md`.
+> The final planned schema-constrained attempt stopped at HTTP 400: an adapter MIME string
+> was sent to a REST enum field. No phase completed; synthetic attempts are now closed.
+> See `docs/live-gemini-v2-final-results.md`. Next is the concrete real-agent plan in
+> `docs/composio-integration-plan.md`, not further synthetic-example expansion.
 > The normative execution
 > contract is in `execution-contract.md`, verification and assessment are under `docs/`, and
 > Phase 1 currently means the narrow local CLI specified in `docs/phase-1-cli.md`. Those documents
