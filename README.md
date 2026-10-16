@@ -194,7 +194,7 @@ Workflow declarations + explicit inputs + immutable baseline
 
 ## Verification and current boundaries
 
-The latest recorded full local Windows quality gate passed **212 tests**, with one existing POSIX-only skip. CI is configured for Windows and Ubuntu; previously confirmed cross-platform CI covers the engine and evaluation CLI, not a newly claimed validation of every later milestone.
+The latest recorded full local Windows quality gate passed **222 tests**, with one existing POSIX-only skip. CI is configured for Windows and Ubuntu; previously confirmed cross-platform CI covers the engine and evaluation CLI, not a newly claimed validation of every later milestone.
 
 The independent usability exercise used a real Composio project not designed around AbilityBench. Its workflow-modeling, decision explanations, side-effect handling, and ordering checks passed. The read-only viewer was checked against retained histories and accepted by the user. See the [independent validation](./docs/independent-workflow-validation.md) and [viewer verification](./docs/phase-3-viewer-usage.md).
 
@@ -202,7 +202,7 @@ The small live Gemini Flash-Lite experiment completed with 5 baseline calls, 2 i
 
 Not included: workflow editing, drag-and-drop, authentication, cloud execution, SQLite, tool replay, or production deployment. Publication and release work are deferred.
 
-The [V1 live validation milestone is closed](./docs/live-validation-closure.md) with those limitations. A [source-grounded v2 example](./docs/live-gemini-grounding-v2.md) supplies catalog and facts explicitly and adds bounded deterministic grounding checks. Its [single controlled live attempt](./docs/live-gemini-v2-results.md) stopped on Markdown-fenced facts at the strict JSON gate, before a completed baseline; no V2 incremental or quality-regression result is claimed.
+The [V1 live validation milestone is closed](./docs/live-validation-closure.md) with those limitations. A [source-grounded v2 example](./docs/live-gemini-grounding-v2.md) supplies catalog and facts explicitly and adds bounded deterministic grounding checks. Its [single controlled live attempt](./docs/live-gemini-v2-results.md) stopped on Markdown-fenced facts at the strict JSON gate, before a completed baseline; no V2 incremental or quality-regression result is claimed. A separate schema-constrained REST adapter configuration is now offline verified, with strict local checks retained; it has not been live validated.
 
 ## Development
 

@@ -4,7 +4,7 @@ Status: offline verified; the [single controlled V2 live attempt](./live-gemini-
 
 ## Explicit source flow
 
-Workflow identity: `live-gemini-source-grounded-v2`.
+Current workflow identity: `live-gemini-source-grounded-v2-json-v1`. The earlier failed attempt retains its original `live-gemini-source-grounded-v2` identity and evidence.
 
 | Stage | Direct dependencies | Source contract |
 | --- | --- | --- |
@@ -18,6 +18,14 @@ Workflow identity: `live-gemini-source-grounded-v2`.
 The catalog preserves the original synthetic scenario: team of three, 40 daily tickets, $70 monthly budget, A/shared inbox/$20/manual tags, B/automated triage/$60/human review required. Review requirements for A are explicitly **unspecified**, not "none." The data is structured rather than relying on a lossy text summary to transport all source information.
 
 All stage inputs reach the provider through declared dependency outputs. There is no hidden catalog file read inside options, risks, report, or summary. Facts remain an explicit dependency of both branches. Report and summary also declare the catalog because their grounding checks require the source.
+
+## Structured-output adapter contract
+
+The facts request now uses the existing REST endpoint's officially documented `generationConfig.responseFormat.text` with `mimeType: "application/json"` and a JSON Schema. See the [official REST example](https://ai.google.dev/gemini-api/docs/generate-content/structured-output) and [API reference](https://ai.google.dev/api/generate-content). Prose stages do not request JSON.
+
+The schema requires exactly `budgetUsd` (nonnegative number), `teamSize` and `dailyTickets` (positive integers), and `humanReviewRequired` (an array of option IDs A/B). Additional properties are forbidden. It describes structure, not the expected source answers. Local validation still parses the entire response strictly, checks types and exact source values, and rejects Markdown fences, extra claims, malformed/truncated output, and non-STOP completion. No normalization or validation relaxation is applied.
+
+The schema is part of the canonical request hash. Adapter/helper watches, stage revisions, and the new workflow identity require a fresh baseline; older snapshots cannot silently satisfy this configuration. This is an offline-verified configuration, not a new live result.
 
 ## Deterministic gates
 
@@ -52,8 +60,10 @@ The sealed DAG, 5/2/5 successful-capture requirement, immutable-baseline checks,
 
 Offline tests cover valid and missing catalog/facts inputs, contradictory source values, price changes, unsupported assumptions, hypothesis labels, word limits, proposal status, summary option/number/cadence fidelity, and accepted distinct recommendations. Missing source prevents dispatch. Generated facts failing grounding retain known usage and raw response evidence without publishing a completed run. Mocked full-protocol tests still enforce 5/2/5 captures and verified four-stage reuse; source/helper changes invalidate reuse. Mock answers are source-aware test fixtures, not live evidence.
 
-The complete Windows quality gate passes with 212 active tests and one existing POSIX-only skip. No `src/` engine files were changed. The three historical manifests and 18 stage artifacts remain verified; existing experiment trees are unchanged during read-only verification.
+The complete Windows quality gate passes with 222 active tests and one existing POSIX-only skip. Tests cover native request configuration, strict valid/fenced/missing/wrong-type/truncated JSON handling, unsupported claims, source contradictions, request binding, and unchanged budget settlement. No `src/` engine files were changed. All six retained experiment trees remain unchanged.
 
-The offline readiness assessment was followed by one explicitly approved live attempt, documented above. It stopped at a strict output-format mismatch; another paid validation should wait for a separately approved provider-format contract revision and its offline tests, not relaxed grounding. The pre-run exposure/headroom were $0.03335395/$0.07664605; after the failed known-usage capture they are $0.03352405/$0.07647595. Under the unchanged configured rates, 12 worst-case Lite attempts reserve $0.0454656, or $0.056832 for all 15 allowed attempts. No budget reset is involved.
+The earlier live attempt stopped at a strict output-format mismatch. The structured-output revision is ready for one final controlled validation only after separate approval; no live requests were made while fixing it. The pre-run exposure/headroom were $0.03335395/$0.07664605; after the failed known-usage capture they are $0.03352405/$0.07647595. Under the unchanged configured rates, 12 worst-case Lite attempts reserve $0.0454656, or $0.056832 for all 15 allowed attempts. Combined exposure would be at most $0.09035605, leaving $0.01964395 beneath the $0.11 cap. No budget reset is involved.
+
+The initial facts request is 1,085 UTF-8 bytes, including the schema (440 bytes more than before). Representative valid downstream requests are at most 1,237 bytes, below the 2,048-byte limit. Future generated dependency text is unknown, so every actual request still passes the byte and token-reservation guards before dispatch; this offline check does not guarantee arbitrary generated text will fit. Output/thinking token allowances and usage reconciliation are unchanged. After this final controlled validation, prioritize real Composio integration rather than further synthetic-example expansion.
 
 Passing the bounded gates is not a general factuality or semantic-equivalence proof. Lexical rules can miss paraphrases or reject defensible wording; source grounding does not prove policy effectiveness or team capacity. A real response may stop on formatting, grounding, token envelope, provider, time, or budget guards. Such failures should remain evidence, not trigger relaxed criteria or an automatic new experiment.

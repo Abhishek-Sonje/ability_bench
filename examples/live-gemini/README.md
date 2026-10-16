@@ -6,6 +6,8 @@ The original live milestone is [closed with its measured evidence and limitation
 
 ## Contract and design
 
+The current `source-grounded-v2-json-v1` configuration requests schema-constrained JSON for facts through REST `generationConfig.responseFormat.text`. Prose stages are unchanged. Strict whole-response parsing and local schema/source checks remain mandatory; fences are not stripped. The new request hash, implementation revision, and workflow identity require a fresh baseline. This configuration is offline verified only; all previous experiment evidence remains immutable.
+
 Live Gemini responses are nondeterministic, even with fixed generation settings. They must **not** be presented as pure stage callbacks. This adapter first asks the engine for a plan; it captures new responses only for planned executing stages, then supplies those immutable snapshots as watched files to deterministic stage callbacks. Each snapshot includes the canonical request hash, resolved response model version and provider usage. Callbacks validate the request against explicit dependency outputs and return only the captured text. Baseline/candidate snapshots live in separate physical project roots; earlier snapshots are copied byte-for-byte, never regenerated for the candidate. Source, prompts, settings, adapter code, and relevant snapshot files are declared influences.
 
 This tests plan-directed incremental AI orchestration with explicit response snapshots. It does not prove that arbitrary live-provider functions are pure, that the engine natively integrates providers, or that new stochastic outputs would equal reused ones. That integration gap is part of the result, not hidden behind `cache: true`.

@@ -56,6 +56,151 @@ async function fixture(fastRetries = false, capUsd = 0.1, modelProfile = "flash"
 }
 
 describe("live Gemini adapter offline guardrails", () => {
+  it("uses the official REST JSON schema only for JSON stages, with strict validation and request binding", async () => {
+    const root = await fixture(false, 0.11, "lite");
+    const adapter = pathToFileURL(join(root, "adapter.mjs")).href;
+    const grounding = pathToFileURL(join(root, "grounding.mjs")).href;
+    await writeFile(
+      join(root, "json-contract.mjs"),
+      `
+      import assert from 'node:assert/strict';
+      import {requestBody,digest,outputFromSnapshot,SETTINGS,Budget,usageFromResponse} from ${JSON.stringify(adapter)};
+      import {FACTS_JSON_SCHEMA,SOURCE_CATALOG,PROMPTS,expectedFacts,validateFacts,stageOutputSchema,EXAMPLE_VERSION} from ${JSON.stringify(grounding)};
+      assert.equal(EXAMPLE_VERSION,'source-grounded-v2-json-v1');
+      const deps={catalog:SOURCE_CATALOG};const body=requestBody(PROMPTS.facts,deps,'facts');
+      assert.deepEqual(body.generationConfig.responseFormat,{text:{mimeType:'application/json',schema:FACTS_JSON_SCHEMA}});
+      assert.equal(body.generationConfig.maxOutputTokens,1024);assert.equal(body.generationConfig.thinkingConfig.thinkingLevel,'LOW');
+      for(const name of ['responseMimeType','responseSchema','responseJsonSchema','_responseJsonSchema'])assert.ok(!(name in body.generationConfig));
+      for(const id of ['options','risks','report','summary'])assert.ok(!requestBody(PROMPTS[id],deps,id).generationConfig.responseFormat);
+      assert.throws(()=>requestBody(PROMPTS.facts,deps),/explicit request stage/);
+      assert.throws(()=>requestBody(PROMPTS.facts,deps,'options'),/explicit request stage/);
+      const clone=stageOutputSchema('facts');clone.required=[];assert.equal(stageOutputSchema('facts').required.length,4);
+      assert.ok(Object.isFrozen(FACTS_JSON_SCHEMA.properties.teamSize));
+      const value=expectedFacts(SOURCE_CATALOG);assert.deepEqual(validateFacts(JSON.stringify(value),SOURCE_CATALOG),value);
+      const snapshot={requestHash:digest({model:SETTINGS.model,body}),modelVersion:SETTINGS.model,text:JSON.stringify(value)};
+      assert.equal(outputFromSnapshot(snapshot,body).text,snapshot.text);
+      const legacy=structuredClone(body);delete legacy.generationConfig.responseFormat;
+      assert.throws(()=>outputFromSnapshot(snapshot,legacy),/does not match/);
+      const changed=structuredClone(body);changed.generationConfig.responseFormat.text.schema.required=[];
+      assert.notEqual(digest({model:SETTINGS.model,body:changed}),snapshot.requestHash);
+      const budget=new Budget(.03352405);budget.preflight();assert.ok(.03352405+15*.0037888<budget.capUsd);
+      budget.reserve(body);budget.record(usageFromResponse({usageMetadata:{promptTokenCount:117,candidatesTokenCount:54,totalTokenCount:171}}));
+      assert.ok(Math.abs(budget.reservedUsd-(.03352405+.0001701))<1e-12);
+      assert.ok(Buffer.byteLength(JSON.stringify(body),'utf8')<=2048);
+    `,
+    );
+    const result = spawnSync(process.execPath, [join(root, "json-contract.mjs")], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
+  const correctFacts = { budgetUsd: 70, teamSize: 3, dailyTickets: 40, humanReviewRequired: ["B"] };
+  const fence = String.fromCharCode(96).repeat(3);
+  it.each([
+    {
+      name: "fenced JSON",
+      text: `${fence}json\n${JSON.stringify(correctFacts)}\n${fence}`,
+      finish: "STOP",
+      origin: "grounding_validation",
+      message: "strict JSON",
+    },
+    {
+      name: "missing fields",
+      text: JSON.stringify({ budgetUsd: 70, teamSize: 3, dailyTickets: 40 }),
+      finish: "STOP",
+      origin: "grounding_validation",
+      message: "missing or unexpected",
+    },
+    {
+      name: "numeric strings",
+      text: JSON.stringify({ ...correctFacts, budgetUsd: "70" }),
+      finish: "STOP",
+      origin: "grounding_validation",
+      message: "numeric budgetUsd",
+    },
+    {
+      name: "noninteger counts",
+      text: JSON.stringify({ ...correctFacts, teamSize: 3.5 }),
+      finish: "STOP",
+      origin: "grounding_validation",
+      message: "positive integer teamSize",
+    },
+    {
+      name: "incorrect array type",
+      text: JSON.stringify({ ...correctFacts, humanReviewRequired: "B" }),
+      finish: "STOP",
+      origin: "grounding_validation",
+      message: "array of source option IDs",
+    },
+    {
+      name: "unsupported additional claims",
+      text: JSON.stringify({ ...correctFacts, capacity: "sufficient" }),
+      finish: "STOP",
+      origin: "grounding_validation",
+      message: "missing or unexpected",
+    },
+    {
+      name: "schema-valid source contradiction",
+      text: JSON.stringify({ ...correctFacts, teamSize: 999 }),
+      finish: "STOP",
+      origin: "grounding_validation",
+      message: "contradict source teamSize",
+    },
+    {
+      name: "truncated JSON despite STOP",
+      text: '{"budgetUsd":70',
+      finish: "STOP",
+      origin: "grounding_validation",
+      message: "strict JSON",
+    },
+    {
+      name: "MAX_TOKENS despite parseable JSON",
+      text: JSON.stringify(correctFacts),
+      finish: "MAX_TOKENS",
+      origin: "provider",
+      message: "truncated",
+    },
+  ])(
+    "rejects $name without retries, false completion, or lost accounting",
+    async ({ text, finish, origin, message }) => {
+      const root = await fixture(false, 0.11, "lite");
+      await writeFile(
+        join(root, "invalid-json.mjs"),
+        `
+      process.env.GEMINI_API_KEY='offline-key';let calls=0;
+      globalThis.fetch=async(url,options)=>{calls++;const body=JSON.parse(options.body);if(body.generationConfig.responseFormat?.text.mimeType!=='application/json')throw new Error('missing JSON mode');return new Response(JSON.stringify({modelVersion:'mock',candidates:[{finishReason:${JSON.stringify(finish)},content:{parts:[{text:${JSON.stringify(text)}}]}}],usageMetadata:{promptTokenCount:117,candidatesTokenCount:54,totalTokenCount:171}}),{status:200});};
+      await import('./run.mjs');if(calls!==1)throw new Error('invalid response retried');
+    `,
+      );
+      const result = spawnSync(process.execPath, [join(root, "invalid-json.mjs")], {
+        encoding: "utf8",
+        timeout: 10_000,
+      });
+      expect(result.status).toBe(1);
+      const name = (await readdir(join(root, ".abilitybench"))).find((name) =>
+        name.startsWith("experiment-"),
+      );
+      const evidence = join(root, ".abilitybench", name ?? "missing");
+      const report = JSON.parse(await readFile(join(evidence, "results.json"), "utf8"));
+      expect(report.status).toBe("incomplete");
+      expect(report.finalFailure.origin).toBe(origin);
+      expect(report.finalFailure.message).toContain(message);
+      expect(report.abilityBenchFailures).toEqual([]);
+      expect(report.executionResults).toEqual([]);
+      expect(report.knownUsageEstimatedCostUsd).toBeCloseTo(0.0001701, 12);
+      expect(report.accountedExposureUsd).toBeCloseTo(0.0001701, 12);
+      expect(report.unknownUsageAttempts).toBe(0);
+      const ledger = JSON.parse(await readFile(join(evidence, "usage-ledger.json"), "utf8"));
+      expect(ledger.ledger[0].status).toBe("failed");
+      expect(ledger.budget.reservations[0].settled).toBe(true);
+      expect(await readFile(join(evidence, "baseline", "snapshots", "facts.json"), "utf8")).toBe(
+        "{}",
+      );
+    },
+  );
+
   it("checks explicit source/facts inputs and rejects known unsupported assumptions without requiring matching prose", async () => {
     const root = await fixture();
     const module = pathToFileURL(join(root, "grounding.mjs")).href;
@@ -100,9 +245,9 @@ describe("live Gemini adapter offline guardrails", () => {
       assert.throws(()=>validateStageOutput('summary','Recommend Option B; proposed weekly review.',parent,PROMPTS.summary),/cadence/);
       assert.throws(()=>validateStageOutput('summary','Recommend Option B; proposed 5% review.',parent,PROMPTS.summary),/number/);
       const workflow=await buildWorkflow(${JSON.stringify(root)},{localCatalogLookupCalls:0,providerToolCalls:0});
-      assert.equal(workflow.id,'live-gemini-source-grounded-v2');
+      assert.equal(workflow.id,'live-gemini-source-grounded-v2-json-v1');
       for(const stage of workflow.stages)assert.ok(stage.watchedPaths.some(path=>path.endsWith('grounding.mjs')));
-      const body=requestBody(PROMPTS.options,deps);const request=JSON.parse(body.contents[0].parts[0].text.split('\\n\\nDeclared dependency outputs:\\n')[1]);assert.deepEqual(request.catalog,c);assert.deepEqual(request.facts,facts);new Budget().reserve(body);
+      const body=requestBody(PROMPTS.options,deps,'options');const request=JSON.parse(body.contents[0].parts[0].text.split('\\n\\nDeclared dependency outputs:\\n')[1]);assert.deepEqual(request.catalog,c);assert.deepEqual(request.facts,facts);new Budget().reserve(body);
     `,
     );
     const result = spawnSync(process.execPath, [join(root, "grounding-checks.mjs")], {

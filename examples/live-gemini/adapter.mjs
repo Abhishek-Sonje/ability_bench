@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { canonicalizeJson, defineWorkflow } from "../../dist/index.js";
 import {
   EXAMPLE_VERSION,
+  stageOutputSchema,
   validateCatalog,
   validateStageInputs,
   validateStageOutput,
@@ -75,7 +76,11 @@ export function retryDelay(attempt, retryAfter, now = Date.now(), random = Math.
     throw new Error("Retry-After exceeds the bounded wait limit; stop instead of retrying early.");
   return delay;
 }
-export function requestBody(prompt, dependencies) {
+export function requestBody(prompt, dependencies, stageId = null) {
+  const promptStage = /^\[([a-z]+)\]/.exec(prompt)?.[1];
+  if (promptStage && promptStage !== stageId)
+    throw new Error("The explicit request stage must match the declared prompt stage.");
+  const schema = stageOutputSchema(stageId);
   return {
     contents: [
       {
@@ -88,6 +93,8 @@ export function requestBody(prompt, dependencies) {
     generationConfig: {
       maxOutputTokens: SETTINGS.maxOutputTokens,
       thinkingConfig: { thinkingLevel: SETTINGS.thinkingLevel },
+      // Official v1beta generateContent REST output contract (not Interactions/SDK fields).
+      ...(schema ? { responseFormat: { text: { mimeType: "application/json", schema } } } : {}),
     },
   };
 }
@@ -298,7 +305,7 @@ export async function buildWorkflow(root, toolMetrics) {
         if (canonicalizeJson(settings) !== canonicalizeJson(SETTINGS))
           throw new Error("Loaded settings differ from declared request settings.");
         validateStageInputs(id, outputs);
-        const output = outputFromSnapshot(snapshot, requestBody(prompt, outputs));
+        const output = outputFromSnapshot(snapshot, requestBody(prompt, outputs, id));
         validateStageOutput(id, output.text, outputs, prompt);
         return output;
       },

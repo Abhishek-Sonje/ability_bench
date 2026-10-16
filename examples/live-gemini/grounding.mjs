@@ -1,5 +1,30 @@
 /** Example-specific source contract and bounded checks, not a general factuality evaluator. */
-export const EXAMPLE_VERSION = "source-grounded-v2";
+export const EXAMPLE_VERSION = "source-grounded-v2-json-v1";
+function freezeSchema(value) {
+  for (const item of Object.values(value)) if (item && typeof item === "object") freezeSchema(item);
+  return Object.freeze(value);
+}
+// JSON Schema describes structure, not the correct source values; grounding stays separate.
+export const FACTS_JSON_SCHEMA = freezeSchema({
+  type: "object",
+  properties: {
+    budgetUsd: { type: "number", minimum: 0 },
+    teamSize: { type: "integer", minimum: 1 },
+    dailyTickets: { type: "integer", minimum: 1 },
+    humanReviewRequired: {
+      type: "array",
+      items: { type: "string", enum: ["A", "B"] },
+      minItems: 0,
+      maxItems: 2,
+    },
+  },
+  required: ["budgetUsd", "teamSize", "dailyTickets", "humanReviewRequired"],
+  additionalProperties: false,
+});
+// Each request receives its own schema copy, avoiding accidental cross-request mutation.
+export function stageOutputSchema(stageId) {
+  return stageId === "facts" ? structuredClone(FACTS_JSON_SCHEMA) : null;
+}
 export const SOURCE_CATALOG = {
   teamSize: 3,
   dailyTickets: 40,
@@ -102,8 +127,27 @@ export function validateFacts(text, catalog) {
   }
   const expected = expectedFacts(catalog);
   requireCondition(
-    keysEqual(facts, Object.keys(expected)),
-    "facts fields are missing or unexpected.",
+    keysEqual(facts, FACTS_JSON_SCHEMA.required),
+    "facts schema fields are missing or unexpected.",
+  );
+  requireCondition(
+    typeof facts.budgetUsd === "number" && Number.isFinite(facts.budgetUsd) && facts.budgetUsd >= 0,
+    "facts schema requires a nonnegative numeric budgetUsd.",
+  );
+  for (const key of ["teamSize", "dailyTickets"])
+    requireCondition(
+      Number.isSafeInteger(facts[key]) && facts[key] > 0,
+      `facts schema requires a positive integer ${key}.`,
+    );
+  requireCondition(
+    Array.isArray(facts.humanReviewRequired) &&
+      facts.humanReviewRequired.length <= 2 &&
+      facts.humanReviewRequired.every(
+        (value) =>
+          typeof value === "string" &&
+          FACTS_JSON_SCHEMA.properties.humanReviewRequired.items.enum.includes(value),
+      ),
+    "facts schema requires an array of source option IDs.",
   );
   for (const key of ["budgetUsd", "teamSize", "dailyTickets"])
     requireCondition(facts[key] === expected[key], `facts contradict source ${key}.`);

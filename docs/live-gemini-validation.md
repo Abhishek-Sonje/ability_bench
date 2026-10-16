@@ -10,7 +10,7 @@ Earlier Gemini 3.8 Flash attempts remain incomplete and preserved separately: pr
 
 Individual request logs and budget reservations stay in ignored local evidence under examples/live-gemini/.abilitybench/. They are not tracked as per-call reports. Explicit invocations carry reconciled exposure forward under the user-approved $0.11 estimated ceiling. Bounded HTTP 503 retries are supported within an invocation; no model substitutions are enabled.
 
-The adapter's offline tests pass. The current full Windows quality gate passes with 212 active tests and one existing POSIX-only skip, including historical Flash guard regressions, Lite budget coverage, and the revised source-grounding gates. Mocked request counts are not live evidence. No engine, cloud, replay, or UI features were added.
+The adapter's offline tests pass. The current full Windows quality gate passes with 222 active tests and one existing POSIX-only skip, including historical Flash guard regressions, Lite budget coverage, source-grounding gates, and the separate schema-constrained facts configuration. The [current adapter contract](./live-gemini-grounding-v2.md) is offline verified, not live validated. Mocked request counts are not live evidence. No engine, cloud, replay, or UI features were added.
 
 ## Historical approved Flash attempt outcome
 

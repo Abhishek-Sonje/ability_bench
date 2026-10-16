@@ -311,7 +311,7 @@ try {
       const dependencies = Object.fromEntries(dependencyIds.map((id) => [id, outputs[id]]));
       validateStageInputs(stageId, dependencies);
       const prompt = await readFile(join(root, "prompts", `${stageId}.txt`), "utf8");
-      const body = requestBody(prompt, dependencies);
+      const body = requestBody(prompt, dependencies, stageId);
       const snapshot = await generate(stageId, body, scenario, dependencies, prompt);
       await writeFile(join(root, "snapshots", `${stageId}.json`), canonicalizeJson(snapshot));
       outputs[stageId] = outputFromSnapshot(snapshot, body);
