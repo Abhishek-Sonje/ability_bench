@@ -1,6 +1,6 @@
 # Real Composio research integration plan
 
-Status: implementation plan, not implemented or live approved. Based on read-only inspection of the sibling `composio-agent` checkout on 2026-10-16. No files there were changed. Synthetic validation is [closed with its final adapter blocker](./live-gemini-v2-final-results.md).
+Status: **Step 1 complete; Step 2 not started; live capture not approved.** See the [offline results and remaining quality findings](./composio-offline-results.md) and [adapter guide](../examples/composio-offline/README.md). Based on inspection of the sibling `composio-agent` checkout on 2026-10-16; no files there were changed. Synthetic validation is [closed with its final adapter blocker](./live-gemini-v2-final-results.md).
 
 ## Preserve the existing agent
 
@@ -30,7 +30,7 @@ load-capture -> validate-result -> assemble-dataset -> analyze -> render-report
 - `render-report`: existing `renderReport` with watched renderer implementation and explicit analysis output. Preserve original row, tie, and opportunity-bucket order. If artifact canonicalization changes object insertion order, use an adapter representation with explicit ordered entries and reconstruct it before rendering; verify byte-for-byte compatibility with the original renderer.
 - Publication stages: `cache: false`, isolated declared output-directory env dependency, existing data formats. `verify-site-data` depends on both publications and reads destination bytes; make it non-cacheable because external destination state is mutable. Validate paths before writes and do not touch the normal site directory.
 
-Start with one retained target result; add more target nodes only after the basic adapter is verified. Separate execution, evaluation, and regression results using existing receipts/read-only viewer. Evaluation failure is not an execution failure.
+Start with one retained target result; add more target nodes only after the basic adapter is verified. **Verified upstream constraint:** the existing analyzer rejects a one-record dataset and requires the canonical 100-record assessment. Step 1 therefore declares the saved dataset as watched context and replaces only the selected target in its original position; it does not relax the analyzer or create additional research nodes. Separate execution, evaluation, and regression results using existing receipts/read-only viewer. Evaluation failure is not an execution failure. Historical context policy differences are preserved and surfaced by evaluation, not silently rewritten.
 
 ## Fingerprints and freshness
 
@@ -51,4 +51,4 @@ Reserve before **every underlying SDK attempt**, reconcile known usage, retain u
 3. **One approved real run:** one target, reviewed action/token/tool limits, cumulative reservation including all retries, isolated storage. Baseline captures research once; a report-only candidate must make zero new model/tool calls, retain identical research artifact hashes, and explain every decision. Verify existing source/evidence checks separately from execution status. A fresh live control is optional and requires its own budget approval; stochastic text equality is not an acceptance condition.
 4. **Only if real usage requires it:** expose the existing collection context and synthesis/mapping boundaries through small exported functions, preserving `researchApp` as a composition wrapper. This enables changing a synthesis prompt against the same declared evidence snapshot without repeating search/fetch. Preserve current prompts, policies, and outputs with tests first. It is an optional follow-up, not justification for rewriting the loop now.
 
-The immediate next task is step 1 plus offline tests—not another synthetic experiment, provider migration, workflow editor, cloud feature, SQLite layer, or generic tool replay system.
+Step 1 and its offline tests are complete. The next proposed task is Step 2's mocked capture boundary, not live capture, another synthetic experiment, provider migration, workflow editor, cloud feature, SQLite layer, or generic tool replay system. Do not proceed automatically from Step 1.

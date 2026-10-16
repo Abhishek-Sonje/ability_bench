@@ -14,6 +14,9 @@
 > was sent to a REST enum field. No phase completed; synthetic attempts are now closed.
 > See `docs/live-gemini-v2-final-results.md`. Next is the concrete real-agent plan in
 > `docs/composio-integration-plan.md`, not further synthetic-example expansion.
+> Step 1's separate offline adapter is now verified against real saved research, with ordering,
+> conservative reuse, isolated publication, and existing policy findings preserved. See
+> `docs/composio-offline-results.md`. Step 2/live capture has not started.
 > The normative execution
 > contract is in `execution-contract.md`, verification and assessment are under `docs/`, and
 > Phase 1 currently means the narrow local CLI specified in `docs/phase-1-cli.md`. Those documents
