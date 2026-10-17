@@ -2,6 +2,8 @@
 
 Status: **offline safeguards implemented; NOT ready for live execution**, 2026-10-16. This follows the [Step 3 audit](./composio-live-experiment-plan.md). No live requests, budget increases, new experiments against providers, or engine changes were made.
 
+**2026-10-17 follow-up:** investigation accepted; Composio-specific infrastructure is parked. The output/thinking documentation question was resolved; [three external blockers remain](./composio-live-blockers.md). The historical preparation findings below and disabled implementation are preserved, not reopened as feature work.
+
 ## What changed
 
 - `examples/composio-capture/experiment-profile.mjs`: separate immutable experiment profile, full-protocol arithmetic preflight, strict outbound-body/destination/tool checks, session binding and an explicitly offline token-count oracle seam. No heuristic character/token estimate is accepted as a live bound.

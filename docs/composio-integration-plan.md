@@ -2,6 +2,8 @@
 
 Status: **Steps 1 and 2 complete; live capture not approved.** See the [offline results](./composio-offline-results.md), [mocked capture results and remaining gates](./composio-capture-results.md), and [capture guide](../examples/composio-capture/README.md). No source-agent files were changed. Synthetic validation is [closed with its final adapter blocker](./live-gemini-v2-final-results.md).
 
+**2026-10-17 decision:** safety investigation accepted; live remains NO-GO and Composio-specific infrastructure is parked. See the [three external blockers](./composio-live-blockers.md). General SDK reusability is now being tested with [Archie](../examples/archie-offline/README.md), not another Composio experiment.
+
 Step 3 planning is recorded in the [controlled live experiment plan](./composio-live-experiment-plan.md). Execution is blocked by the unbounded practical token profile, insufficient conservative reservation and remaining native-transport/account-pricing gates. No live requests or budget increase are authorized.
 
 Approved narrow preparation is recorded in the [bounded experiment safety report](./composio-safety-preparation.md). Offline guards and a conditional $0.06662080 profile are implemented; unresolved token/provider-cost/backend safety bounds keep the live entry point disabled. This is not approval or readiness for live execution.

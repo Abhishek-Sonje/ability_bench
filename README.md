@@ -194,7 +194,7 @@ Workflow declarations + explicit inputs + immutable baseline
 
 ## Verification and current boundaries
 
-The latest recorded full local Windows quality gate passed **262 tests**, with one existing POSIX-only skip. CI is configured for Windows and Ubuntu; previously confirmed cross-platform CI covers the engine and evaluation CLI, not a newly claimed validation of every later milestone.
+The latest recorded full local Windows quality gate passed **311 tests**, with one existing POSIX-only skip. CI is configured for Windows and Ubuntu; previously confirmed cross-platform CI covers the engine and evaluation CLI, not a newly claimed validation of every later milestone.
 
 The independent usability exercise used a real Composio project not designed around AbilityBench. Its workflow-modeling, decision explanations, side-effect handling, and ordering checks passed. The read-only viewer was checked against retained histories and accepted by the user. See the [independent validation](./docs/independent-workflow-validation.md) and [viewer verification](./docs/phase-3-viewer-usage.md).
 
@@ -202,11 +202,13 @@ The small live Gemini Flash-Lite experiment completed with 5 baseline calls, 2 i
 
 Not included: workflow editing, drag-and-drop, authentication, cloud execution, SQLite, tool replay, or production deployment. Publication and release work are deferred.
 
-The [V1 live validation milestone is closed](./docs/live-validation-closure.md) with those limitations. A [source-grounded v2 example](./docs/live-gemini-grounding-v2.md) supplies catalog and facts explicitly and adds bounded deterministic grounding checks. Its first attempt stopped on fenced JSON; its [final planned attempt](./docs/live-gemini-v2-final-results.md) exposed an adapter MIME-enum request defect before any completed baseline. No V2 incremental or quality-regression result is claimed. Synthetic attempts are closed; next is [real Composio integration](./docs/composio-integration-plan.md), not another synthetic experiment.
+The [V1 live validation milestone is closed](./docs/live-validation-closure.md) with those limitations. A [source-grounded v2 example](./docs/live-gemini-grounding-v2.md) supplies catalog and facts explicitly and adds bounded deterministic grounding checks. Its first attempt stopped on fenced JSON; its [final planned attempt](./docs/live-gemini-v2-final-results.md) exposed an adapter MIME-enum request defect before any completed baseline. No V2 incremental or quality-regression result is claimed. Synthetic attempts are closed; [existing-agent integration](./docs/composio-integration-plan.md) has progressed offline, with live Composio work now parked in favor of SDK reusability validation.
 
 The [offline existing-agent adapter](./examples/composio-offline/README.md) now completes Step 1 using actual saved Composio research and the original schema/builder/analyzer/renderer. It preserves order, explains conservative reuse/reruns, isolates opt-in publishing, and makes no provider calls. The engine/SDK and original agent are unchanged. See [verified results and existing policy findings](./docs/composio-offline-results.md); live capture is not implemented or approved.
 
 Step 2's separate [mocked capture boundary](./examples/composio-capture/README.md) now observes per-attempt usage/retries with durable accounting, private-by-default evidence, immutable exports, and explicit Step 1 adoption. Installed SDKs and the unchanged CLI path passed against mocked responses; historical policy failures remain visible. [Verification and remaining live-experiment gates](./docs/composio-capture-results.md). There is no live mode or new engine/provider integration.
+
+Composio live work is now [parked with three external blockers](./docs/composio-live-blockers.md). A second [existing TypeScript agent, Archie](./examples/archie-offline/README.md), passed offline snapshot reuse/invalidation and separate evaluation through the same public SDK, without core or agent changes. [Results and limits](./docs/archie-integration-results.md): two application domains, not automatic agent integration, semantic quality proof or new paid-call savings. [Full-request REST counting](./docs/rest-token-counting-investigation.md) remains an independent investigation, not a proven spending bound.
 
 ## Development
 
