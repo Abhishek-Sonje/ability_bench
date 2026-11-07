@@ -4,12 +4,45 @@ AbilityBench is being prepared as a recorded-result SDK and independent history 
 for local TypeScript workflows. The authoritative release contract is
 [specification #10](https://github.com/Abhishek-Sonje/ability_bench/issues/10).
 
-This checkout implements the isolation slice
-[#11](https://github.com/Abhishek-Sonje/ability_bench/issues/11). It is an intermediate,
-private development version, not a usable or qualified 0.1.0 release. Supported runtime
-SDK entrypoints and the four-command CLI arrive in subsequent tickets. The root
-entrypoint currently exposes only JSON types; historical runtime exports and the CLI
-bin are removed from the supported boundary without adding compatibility aliases.
+This checkout implements isolation [#11](https://github.com/Abhishek-Sonje/ability_bench/issues/11)
+and selected ordered-history reads [#12](https://github.com/Abhishek-Sonje/ability_bench/issues/12).
+It is an intermediate, private development version, not a qualified 0.1.0 release.
+The root entrypoint exposes `openHistory`, `AbilityBenchError` and their associated
+types. Workflow execution, history listing/comparison, legacy-format reading and the
+four-command CLI arrive in subsequent tickets; retired runtime exports stay private.
+
+```ts
+import { openHistory } from "abilitybench";
+
+const history = openHistory("/absolute/path/to/history");
+const inspection = await history.run(runId); // outputReferences: "unchecked"
+const value = await history.output(runId, "report"); // ordinary mutable JSON, including null
+// Pass value to an existing application validator.
+```
+
+These two reads need no workflow, source root, configuration or providers. Inspection
+verifies the selected record and reference schemas; output verifies only the selected
+artifact. Successful outputs remain readable from failed runs, baseline chains and
+always-execute stages, without ancestors or unrelated artifacts. Reads never create,
+repair or modify history. Each result is independent and mutable. Integrity is not
+authenticity, application validity, reuse eligibility or current-world freshness.
+
+New records use `abilitybench-run-v2`, `ordered-json-v1`, `sha256-domain-v2` and
+`declared-influences-v2`. Artifacts have an explicit three-line format header followed
+by compact ordered JSON. Object enumeration (including integer keys) and array order
+are preserved. Acyclic repeated references copy independently; escaped lone surrogates
+are allowed. Unsupported JSON values, descriptors and prototypes reject without
+calling getters or `toJSON`. The old sorted codec checks remain transitional internal
+checks for the retained machinery, not expectations for new recorded values.
+
+Run reads are bounded to 2 MiB; output payloads to 16 MiB plus the exact fixed header
+overhead. Reads check opened regular files, physical containment, actual accumulated
+bytes and EOF. Errors distinguish invalid arguments, missing history/run/stage,
+absent output, missing/corrupt/unreadable data, unknown format and exceeded limits.
+`AbilityBenchError` exposes `code`, `operation` and relevant identity/path/limit context;
+`output_absent` includes the recorded status/reason. No fallback search or partial value
+is returned. Storage is private: new objects occupy a separate format namespace and
+no storage/codec/testing API is exported.
 
 ## Development checks
 
