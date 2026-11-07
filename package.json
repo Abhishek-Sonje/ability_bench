@@ -4,9 +4,6 @@
   "private": true,
   "description": "Dependency-aware incremental execution for deterministic developer workflows.",
   "type": "module",
-  "bin": {
-    "abilitybench": "./dist/cli.js"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
@@ -18,22 +15,32 @@
     "node": ">=24.20.0 <25"
   },
   "scripts": {
-    "example:evaluation-regression": "pnpm build && node examples/evaluation-regression/run.mjs",
-    "example:composio-research": "pnpm build && node examples/composio-research/demo.mjs",
-    "build": "tsc -p tsconfig.build.json",
-    "check": "biome check . && tsc -p tsconfig.build.json && tsc -p tsconfig.json --noEmit && tsc -p tsconfig.viewer.json && vitest run",
-    "example:release-readiness": "pnpm build && node examples/release-readiness/run.ts",
-    "format": "biome format --write .",
-    "lint": "biome check .",
-    "test": "pnpm build && vitest run",
+    "build": "node scripts/build.mjs",
+    "check": "pnpm lint && pnpm build && pnpm typecheck && pnpm test:unit",
+    "check:isolated": "node scripts/check-isolated.mjs",
+    "format": "biome format --write src tests scripts *.json vitest.config.ts",
+    "lint": "biome check src tests scripts package.json biome.json tsconfig.json tsconfig.build.json vitest.config.ts",
+    "test": "pnpm build && pnpm test:unit",
+    "test:unit": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.viewer.json",
-    "viewer": "pnpm build && node dist/viewer-cli.js"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "legacy:build": "pnpm --dir legacy build",
+    "legacy:typecheck": "pnpm --dir legacy typecheck",
+    "legacy:test": "pnpm --dir legacy test",
+    "legacy:check": "pnpm --dir legacy check",
+    "legacy:viewer": "pnpm --dir legacy viewer",
+    "legacy:format": "pnpm --dir legacy exec biome format --write .",
+    "legacy:lint": "pnpm --dir legacy exec biome check ."
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.14",
     "@types/node": "26.6.2",
     "typescript": "7.0.2",
     "vitest": "5.0.1"
-  }
+  },
+  "files": [
+    "dist/*.js",
+    "dist/*.d.ts",
+    "README.md"
+  ]
 }

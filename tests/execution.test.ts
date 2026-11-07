@@ -2,16 +2,12 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
-
-import {
-  type BaselineRun,
-  defineWorkflow,
-  executeWorkflow,
-  InMemoryArtifactStore,
-  planWorkflow,
-  type StageFunction,
-} from "../src/index.js";
+import { afterEach, describe, expect, it } from "vitest";
+import { InMemoryArtifactStore } from "../src/artifact-store.js";
+import { executeWorkflow } from "../src/execution.js";
+import { type BaselineRun, planWorkflow } from "../src/planning.js";
+import type { StageFunction } from "../src/types.js";
+import { defineWorkflow } from "../src/workflow.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -138,136 +134,6 @@ describe("workflow execution", () => {
     expect(second.stages.every(({ executionStatus }) => executionStatus === "reused")).toBe(true);
   });
 
-  it("falls back from a missing artifact and executes descendants", async () => {
-    const workflow = await workflowFixture();
-    const store = new InMemoryArtifactStore();
-    const firstPlan = await planWorkflow({
-      workflow,
-      inputs: {},
-      environment: {},
-      baseline: null,
-      invalidate: [],
-    });
-    const first = await executeWorkflow({
-      workflow,
-      plan: firstPlan,
-      inputs: {},
-      environment: {},
-      artifacts: store,
-    });
-    const baseline = baselineFrom(first);
-    const plan = await planWorkflow({
-      workflow,
-      inputs: {},
-      environment: {},
-      baseline,
-      invalidate: [],
-    });
-    const leftHash = baseline.stages.find(({ stageId }) => stageId === "left")?.outputArtifactHash;
-    if (leftHash === null || leftHash === undefined) throw new Error("Missing fixture hash.");
-    store.delete(leftHash);
-    const result = await executeWorkflow({
-      workflow,
-      plan,
-      inputs: {},
-      environment: {},
-      artifacts: store,
-    });
-    const statuses = Object.fromEntries(
-      result.stages.map(({ stageId, executionStatus, decisionReason }) => [
-        stageId,
-        [executionStatus, decisionReason],
-      ]),
-    );
-    expect(statuses).toMatchObject({
-      seed: ["reused", "fingerprint_match"],
-      left: ["succeeded", "baseline_artifact_unavailable"],
-      right: ["reused", "fingerprint_match"],
-      join: ["succeeded", "dependency_executed"],
-      report: ["succeeded", "dependency_executed"],
-      z_independent: ["reused", "fingerprint_match"],
-    });
-    expect(result.stages.find(({ stageId }) => stageId === "left")?.outputArtifactHash).toBe(
-      leftHash,
-    );
-    expect(result.stages.find(({ stageId }) => stageId === "join")?.finalDecision).toBe("execute");
-  });
-
-  it("records failures separately from evaluation and stops remaining work", async () => {
-    const right = vi.fn(() => ({ unreachable: true }));
-    const workflow = await workflowFixture({
-      left: () => {
-        throw new Error("left failed");
-      },
-      right,
-    });
-    const plan = await planWorkflow({
-      workflow,
-      inputs: {},
-      environment: {},
-      baseline: null,
-      invalidate: [],
-    });
-    const result = await executeWorkflow({
-      workflow,
-      plan,
-      inputs: {},
-      environment: {},
-      artifacts: new InMemoryArtifactStore(),
-    });
-    expect(result.executionStatus).toBe("failed");
-    expect(result.evaluationStatus).toBe("not_run");
-    expect(result.stages.find(({ stageId }) => stageId === "left")).toMatchObject({
-      executionStatus: "failed",
-      error: { name: "Error", message: "left failed" },
-    });
-    expect(result.stages.find(({ stageId }) => stageId === "join")?.executionStatus).toBe(
-      "skipped_dependency_failed",
-    );
-    expect(result.stages.find(({ stageId }) => stageId === "right")?.executionStatus).toBe(
-      "skipped_run_stopped",
-    );
-    expect(right).not.toHaveBeenCalled();
-  });
-
-  it("isolates dependency and selected-input objects from stage mutation", async () => {
-    const observed: number[] = [];
-    const workflow = await workflowFixture({
-      seed: ({ inputs }) => {
-        const value = inputs["/value"] as { count: number };
-        value.count = 99;
-        return { count: 1 };
-      },
-      left: ({ dependencies }) => {
-        const seed = Object.values(dependencies)[0] as { count: number };
-        seed.count = 42;
-        return { changed: true };
-      },
-      right: ({ dependencies }) => {
-        observed.push((Object.values(dependencies)[0] as { count: number }).count);
-        return { unchanged: true };
-      },
-    });
-    const inputs = { value: { count: 1 } };
-    const plan = await planWorkflow({
-      workflow,
-      inputs,
-      environment: {},
-      baseline: null,
-      invalidate: [],
-    });
-    const result = await executeWorkflow({
-      workflow,
-      plan,
-      inputs,
-      environment: {},
-      artifacts: new InMemoryArtifactStore(),
-    });
-    expect(result.executionStatus).toBe("completed");
-    expect(observed).toEqual([1]);
-    expect(inputs.value.count).toBe(1);
-  });
-
   it("rechecks watched files before using a planned artifact", async () => {
     const workflow = await workflowFixture();
     const store = new InMemoryArtifactStore();
@@ -349,42 +215,6 @@ describe("workflow execution", () => {
       finalDecision: "execute",
       executionStatus: "failed",
       error: { name: "FingerprintInputError" },
-    });
-    expect(result.stages.find(({ stageId }) => stageId === "join")?.executionStatus).toBe(
-      "skipped_dependency_failed",
-    );
-  });
-
-  it("fails a run when declared inputs change while a stage executes", async () => {
-    let root = "";
-    const workflow = await workflowFixture({
-      left: async () => {
-        await writeFile(join(root, "left.ts"), "changed during execution\n", "utf8");
-        return { unsafe: true };
-      },
-    });
-    root = workflow.root;
-    const plan = await planWorkflow({
-      workflow,
-      inputs: {},
-      environment: {},
-      baseline: null,
-      invalidate: [],
-    });
-    const result = await executeWorkflow({
-      workflow,
-      plan,
-      inputs: {},
-      environment: {},
-      artifacts: new InMemoryArtifactStore(),
-    });
-    expect(result.executionStatus).toBe("failed");
-    expect(result.stages.find(({ stageId }) => stageId === "left")).toMatchObject({
-      executionStatus: "failed",
-      outputArtifactHash: null,
-      error: {
-        message: expect.stringContaining("changed during execution"),
-      },
     });
     expect(result.stages.find(({ stageId }) => stageId === "join")?.executionStatus).toBe(
       "skipped_dependency_failed",

@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { ViewerData } from "../dist/viewer-data.js";
-import { layout } from "../viewer/model.js";
+import { ViewerData } from "./dist/viewer-data.js";
+import { layout } from "./viewer/model.js";
 
 // Explicit retained store only. This verification tool never runs workflows or writes history.
 const [storage, workflowId] = process.argv.slice(2);

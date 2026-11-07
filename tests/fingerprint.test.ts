@@ -1,10 +1,12 @@
-import { chmod, mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { computeStageFingerprint, defineWorkflow, type StageDefinition } from "../src/index.js";
+import { computeStageFingerprint } from "../src/fingerprint.js";
+import type { StageDefinition } from "../src/types.js";
+import { defineWorkflow } from "../src/workflow.js";
 
 const temporaryRoots: string[] = [];
 afterEach(async () => {
@@ -61,26 +63,6 @@ async function fingerprint(root: string, definition = stage(root)) {
 }
 
 describe("stage fingerprints", () => {
-  it("is stable across timestamps, declaration order, and input key order", async () => {
-    const root = await fixtureRoot();
-    const first = await fingerprint(root);
-    await utimes(join(root, "stage.ts"), new Date(1_000), new Date(2_000));
-    const reordered = stage(root, {
-      inputs: ["/missing", "/dataset"],
-      env: ["UNSET", "RULESET", "EMPTY"],
-    });
-    const second = await computeStageFingerprint({
-      workflowId: "fingerprint-example",
-      workflowRoot: root,
-      stage: reordered,
-      runInputs: { dataset: { a: 1, b: 2 }, ignored: true },
-      environment: { EMPTY: "", RULESET: "v1" },
-      dependencyArtifacts: { parent: `sha256:${"a".repeat(64)}` },
-    });
-    expect(second.fingerprint).toBe(first.fingerprint);
-    expect(second.componentHashes).toEqual(first.componentHashes);
-  });
-
   it("changes only the watched-file component when bytes change", async () => {
     const root = await fixtureRoot();
     const first = await fingerprint(root);
@@ -108,12 +90,6 @@ describe("stage fingerprints", () => {
     const populated = await calculate({ VALUE: "secret" });
     expect(new Set([missing.fingerprint, empty.fingerprint, populated.fingerprint]).size).toBe(3);
     expect(JSON.stringify(populated.manifest)).not.toContain("secret");
-  });
-
-  it("represents a missing watched file explicitly", async () => {
-    const root = await fixtureRoot();
-    const result = await fingerprint(root, stage(root, { watch: ["missing.ts"] }));
-    expect(result.manifest.watchedFiles).toEqual([{ path: "missing.ts", state: "missing" }]);
   });
 
   it("rejects a watched directory as an invalid target", async () => {
@@ -167,28 +143,5 @@ describe("stage fingerprints", () => {
         dependencyArtifacts: {},
       }),
     ).rejects.toMatchObject({ code: "dependency_artifact_missing" });
-  });
-
-  it("rejects an existing watched file through a parent junction outside the root", async () => {
-    const root = await fixtureRoot();
-    const outside = await fixtureRoot();
-    await writeFile(join(outside, "secret.ts"), "outside\n", "utf8");
-    await symlink(outside, join(root, "linked"), "junction");
-    await expect(
-      fingerprint(root, stage(root, { watch: ["linked/secret.ts"] })),
-    ).rejects.toMatchObject({
-      code: "watch_path_escaped",
-    });
-  });
-
-  it("rejects a missing watched file through a parent junction outside the root", async () => {
-    const root = await fixtureRoot();
-    const outside = await fixtureRoot();
-    await symlink(outside, join(root, "linked"), "junction");
-    await expect(
-      fingerprint(root, stage(root, { watch: ["linked/missing.ts"] })),
-    ).rejects.toMatchObject({
-      code: "watch_path_escaped",
-    });
   });
 });

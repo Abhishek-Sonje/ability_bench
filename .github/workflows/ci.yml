@@ -38,4 +38,4 @@ jobs:
           require-lockfile: true
 
       - name: Run quality gate
-        run: pnpm check
+        run: pnpm check:isolated

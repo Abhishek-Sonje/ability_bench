@@ -3,16 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
-
-import {
-  createArtifact,
-  defineWorkflow,
-  executeWorkflow,
-  FileArtifactStore,
-  FileRunManifestStore,
-  finalizeRunManifest,
-  planWorkflow,
-} from "../src/index.js";
+import { executeWorkflow } from "../src/execution.js";
+import { FileArtifactStore, FileRunManifestStore } from "../src/filesystem-store.js";
+import { planWorkflow } from "../src/planning.js";
+import { finalizeRunManifest } from "../src/run-manifest.js";
+import { createArtifact } from "../src/serialization.js";
+import { defineWorkflow } from "../src/workflow.js";
 
 const roots: string[] = [];
 afterEach(async () => {

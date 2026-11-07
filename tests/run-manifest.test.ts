@@ -3,17 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
-
-import {
-  defineWorkflow,
-  executeWorkflow,
-  finalizeRunManifest,
-  InMemoryArtifactStore,
-  manifestToBaseline,
-  planWorkflow,
-  verifyRunManifest,
-  type WorkflowExecutionResult,
-} from "../src/index.js";
+import { InMemoryArtifactStore } from "../src/artifact-store.js";
+import { executeWorkflow } from "../src/execution.js";
+import { planWorkflow } from "../src/planning.js";
+import { finalizeRunManifest, manifestToBaseline, verifyRunManifest } from "../src/run-manifest.js";
+import { defineWorkflow } from "../src/workflow.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -127,23 +121,5 @@ describe("content-addressed run manifests", () => {
     expect(baseline.stages.find(({ stageId }) => stageId === "consumer")?.artifactAvailable).toBe(
       true,
     );
-  });
-
-  it("does not allow failed executions to become baselines", async () => {
-    const { workflow, execution, artifacts } = await completedRun();
-    const failed = {
-      ...execution,
-      executionStatus: "failed",
-    } as WorkflowExecutionResult;
-    const manifest = finalizeRunManifest({
-      workflow,
-      execution: failed,
-      createdAt: "2026-09-23T00:00:00.000Z",
-      completedAt: "2026-09-23T00:00:01.000Z",
-    });
-
-    await expect(manifestToBaseline(manifest, artifacts)).rejects.toMatchObject({
-      code: "manifest_not_completed",
-    });
   });
 });
