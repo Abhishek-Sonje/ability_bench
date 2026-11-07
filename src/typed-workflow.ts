@@ -1,331 +1,167 @@
-import type {
-  BuiltWorkflow,
-  JsonValue,
-  StageDeclaration,
-  StageFunction,
-  WorkflowOptions,
-} from "./types.js";
+import { AbilityBenchError } from "./errors.js";
+import { validId } from "./recorded-data.js";
+import { copyValue } from "./recorded-values.js";
+import type { JsonObject, JsonValue } from "./types.js";
 import { defineWorkflow } from "./workflow.js";
 
-export interface StageHandle<Id extends string = string, Output extends JsonValue = JsonValue> {
-  readonly id: Id;
-  /** Type-only marker; no output value is stored on a stage handle. */
+export interface StageHandle<Output extends JsonValue = JsonValue> {
+  readonly id: string;
   readonly __output?: Output;
 }
-
-export type AnyStageHandle = StageHandle<string, JsonValue>;
-
-export type StageHandleOutput<Handle extends AnyStageHandle> =
-  Handle extends StageHandle<string, infer Output> ? Output : never;
-
-export type DependencyOutputs<Dependencies extends readonly AnyStageHandle[]> = {
-  readonly [Dependency in Dependencies[number] as Dependency["id"]]: StageHandleOutput<Dependency>;
+export type DependencyBindings = Readonly<Record<string, StageHandle>>;
+export type DependencyOutputs<D extends DependencyBindings> = {
+  [K in keyof D]: D[K] extends StageHandle<infer O> ? O : never;
 };
-
-export interface InputDescriptor<Value = unknown> {
-  readonly pointer: string;
-  readonly contract: string;
-  /** Type-only marker; no selected value is stored on a descriptor. */
-  readonly __value?: Value;
+export interface ReuseOptions {
+  readonly revision?: string;
+  readonly files?: readonly string[];
 }
-
-export type AnyInputDescriptor = InputDescriptor<unknown>;
-export type InputDefinitions = Readonly<Record<string, AnyInputDescriptor>>;
-export type InputDescriptorValue<Descriptor extends AnyInputDescriptor> =
-  Descriptor extends InputDescriptor<infer Value> ? Value : never;
-export type TypedInputs<Inputs extends InputDefinitions> = {
-  readonly [Name in keyof Inputs]: InputDescriptorValue<Inputs[Name]>;
-};
-
-export type InputValidationErrorCode = "input_missing" | "input_type_mismatch";
-
-export class InputValidationError extends TypeError {
-  constructor(
-    readonly code: InputValidationErrorCode,
-    readonly pointer: string,
-    readonly expected: string,
-  ) {
-    super(
-      code === "input_missing"
-        ? `Input "${pointer}" is required as ${expected}.`
-        : `Input "${pointer}" must be ${expected}.`,
-    );
-    this.name = "InputValidationError";
-  }
-}
-
-export interface CacheInfluences<
-  Mode extends "cacheable" | "disabled" | "volatile" = "cacheable" | "disabled" | "volatile",
-  Environment extends readonly string[] = readonly string[],
+export interface StageOptions<
+  D extends DependencyBindings,
+  I extends JsonObject,
+  O extends JsonValue,
 > {
-  readonly mode: Mode;
-  readonly revision: string;
-  readonly files: readonly string[];
-  readonly environment: Environment;
+  readonly id: string;
+  readonly dependencies?: D;
+  readonly inputs?: I;
+  readonly environment?: readonly string[];
+  readonly reuse?: false | ReuseOptions;
+  readonly run: (context: {
+    inputs: I;
+    dependencies: DependencyOutputs<D>;
+    env: Record<string, string | undefined>;
+  }) => O | Promise<O>;
 }
-
-export type AnyCacheInfluences = CacheInfluences<
-  "cacheable" | "disabled" | "volatile",
-  readonly string[]
->;
-
-export type TypedEnvironment<Influences extends AnyCacheInfluences> = Readonly<
-  Record<Influences["environment"][number], string | undefined>
->;
-
-export interface TypedStageContext<
-  Dependencies extends readonly AnyStageHandle[],
-  Inputs extends InputDefinitions,
-  Influences extends AnyCacheInfluences,
-> {
-  readonly dependencies: DependencyOutputs<Dependencies>;
-  readonly inputs: TypedInputs<Inputs>;
-  readonly env: TypedEnvironment<Influences>;
+export interface StageMetadata {
+  id: string;
+  dependencies: DependencyBindings;
+  inputs: JsonObject;
+  environment: readonly string[];
+  reuse: false | ReuseOptions;
+  run: (context: {
+    inputs: JsonObject;
+    dependencies: Record<string, JsonValue>;
+    env: Record<string, string | undefined>;
+  }) => JsonValue | Promise<JsonValue>;
 }
-
-export interface CacheableInfluenceOptions<Environment extends readonly string[]> {
-  readonly revision: string;
-  readonly files: readonly [string, ...string[]];
-  readonly environment: Environment;
+const declarations = new WeakMap<StageHandle, StageMetadata>();
+export interface Workflow {
+  readonly id: string;
+  readonly root: string;
+  readonly topologicalOrder: readonly string[];
 }
-
-export interface NonCacheableInfluenceOptions<Environment extends readonly string[]> {
-  readonly revision: string;
-  readonly files: readonly string[];
-  readonly environment: Environment;
-}
-
-export type TypedStageDeclaration<
-  Id extends string,
-  Dependencies extends readonly AnyStageHandle[],
-  Inputs extends InputDefinitions,
-  Influences extends AnyCacheInfluences,
-  Output extends JsonValue,
-> = {
-  readonly id: Id;
-  readonly dependsOn: Dependencies;
-  readonly inputs: Inputs;
-  readonly cache: Influences;
-  readonly run: (
-    context: TypedStageContext<Dependencies, Inputs, Influences>,
-  ) => Output | Promise<Output>;
-};
-
-export interface ComposedWorkflowOptions extends WorkflowOptions {
-  readonly stages: readonly AnyStageHandle[];
-}
-
-type InputParser = (value: JsonValue | undefined, pointer: string) => unknown;
-
-const declarations = new WeakMap<object, StageDeclaration>();
-const inputParsers = new WeakMap<object, InputParser>();
-const influenceDeclarations = new WeakSet<object>();
-
-/** Internal descriptor provenance check shared by declaration APIs. */
-export function isBuiltInInputDescriptor(value: unknown): value is AnyInputDescriptor {
-  return typeof value === "object" && value !== null && inputParsers.has(value);
-}
-
-/** Internal runtime parsing shared by stage and evaluation preparation. */
-export function parseBuiltInInputDescriptor(
-  descriptor: AnyInputDescriptor,
-  value: JsonValue | undefined,
-): unknown {
-  const parse = inputParsers.get(descriptor);
-  if (!parse)
-    throw new TypeError("Input descriptor was not created by the AbilityBench input API.");
-  return parse(value, descriptor.pointer);
-}
-
-function required<Value>(value: Value | undefined, pointer: string, expected: string): Value {
-  if (value === undefined) {
-    throw new InputValidationError("input_missing", pointer, expected);
+const workflows = new WeakMap<Workflow, readonly StageHandle[]>();
+function copyInputs(value: unknown, stageId: string): JsonObject {
+  try {
+    return copyValue(value) as JsonObject;
+  } catch (error) {
+    if (error instanceof AbilityBenchError)
+      throw new AbilityBenchError(error.code, error.message, error.operation, {
+        ...error.context,
+        stageId,
+      });
+    throw error;
   }
-  return value;
 }
-
-function descriptor<Value>(
-  pointer: string,
-  contract: string,
-  parse: InputParser,
-): InputDescriptor<Value> {
-  const result: InputDescriptor<Value> = Object.freeze({ pointer, contract });
-  inputParsers.set(result, parse);
-  return result;
+function plainObject(value: unknown): boolean {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
+  );
 }
-
-function scalar<Value extends JsonValue>(
-  pointer: string,
-  kind: "boolean" | "number" | "string",
-): InputDescriptor<Value> {
-  return descriptor<Value>(pointer, `required-${kind}-v1`, (value) => {
-    const selected = required(value, pointer, kind);
-    if (typeof selected !== kind) {
-      throw new InputValidationError("input_type_mismatch", pointer, `a ${kind}`);
-    }
-    return selected;
-  });
+function invalid(message: string): never {
+  throw new AbilityBenchError("invalid_declaration", message, "declaration");
 }
-
-export const input = Object.freeze({
-  json(pointer: string): InputDescriptor<JsonValue> {
-    return descriptor(pointer, "required-json-v1", (value) =>
-      required(value, pointer, "JSON value"),
-    );
-  },
-  boolean(pointer: string): InputDescriptor<boolean> {
-    return scalar<boolean>(pointer, "boolean");
-  },
-  number(pointer: string): InputDescriptor<number> {
-    return scalar<number>(pointer, "number");
-  },
-  string(pointer: string): InputDescriptor<string> {
-    return scalar<string>(pointer, "string");
-  },
-  stringArray(pointer: string): InputDescriptor<string[]> {
-    return descriptor(pointer, "required-string-array-v1", (value) => {
-      const selected = required(value, pointer, "string array");
-      if (!Array.isArray(selected) || !selected.every((item) => typeof item === "string")) {
-        throw new InputValidationError("input_type_mismatch", pointer, "an array of strings");
-      }
-      return selected;
-    });
-  },
-  optional<Value>(base: InputDescriptor<Value>): InputDescriptor<Value | undefined> {
-    const parse = inputParsers.get(base);
-    if (parse === undefined) {
-      throw new TypeError("Optional input base was not created by the AbilityBench input API.");
-    }
-    return descriptor(base.pointer, `optional-${base.contract}`, (value, pointer) =>
-      value === undefined ? undefined : parse(value, pointer),
-    );
-  },
-});
-
-function influences<
-  const Mode extends "cacheable" | "disabled" | "volatile",
-  const Environment extends readonly string[],
->(
-  mode: Mode,
-  options: CacheableInfluenceOptions<Environment> | NonCacheableInfluenceOptions<Environment>,
-): CacheInfluences<Mode, Environment> {
-  const result: CacheInfluences<Mode, Environment> = Object.freeze({
-    mode,
-    revision: options.revision,
-    files: Object.freeze([...options.files]),
-    environment: Object.freeze([...options.environment]) as unknown as Environment,
-  });
-  influenceDeclarations.add(result);
-  return result;
-}
-
-export const cache = Object.freeze({
-  enabled<const Environment extends readonly string[]>(
-    options: CacheableInfluenceOptions<Environment>,
-  ): CacheInfluences<"cacheable", Environment> {
-    return influences("cacheable", options);
-  },
-  disabled<const Environment extends readonly string[]>(
-    options: NonCacheableInfluenceOptions<Environment>,
-  ): CacheInfluences<"disabled", Environment> {
-    return influences("disabled", options);
-  },
-  volatile<const Environment extends readonly string[]>(
-    options: NonCacheableInfluenceOptions<Environment>,
-  ): CacheInfluences<"volatile", Environment> {
-    return influences("volatile", options);
-  },
-});
-
-/**
- * Declares a stage without executing it and carries its input and output types to callbacks.
- */
-export function defineStage<
-  const Id extends string,
-  const Dependencies extends readonly AnyStageHandle[],
-  const Inputs extends InputDefinitions,
-  const Influences extends AnyCacheInfluences,
-  Output extends JsonValue,
->(
-  declaration: TypedStageDeclaration<Id, Dependencies, Inputs, Influences, Output>,
-): StageHandle<Id, Output> {
-  for (const dependency of declaration.dependsOn) {
-    if (!declarations.has(dependency)) {
-      throw new TypeError(
-        `Stage "${declaration.id}" received a dependency that was not created by defineStage().`,
-      );
-    }
-  }
-  if (!influenceDeclarations.has(declaration.cache)) {
-    throw new TypeError(
-      `Stage "${declaration.id}" cache influences were not created by the AbilityBench cache API.`,
-    );
-  }
-
-  const pointers = new Map<string, string>();
-  const typedInputs = Object.entries(declaration.inputs).map(([name, selection]) => {
-    const parse = inputParsers.get(selection);
-    if (parse === undefined) {
-      throw new TypeError(
-        `Stage "${declaration.id}" input "${name}" was not created by the AbilityBench input API.`,
-      );
-    }
-    const existing = pointers.get(selection.pointer);
-    if (existing !== undefined && existing !== selection.contract) {
-      throw new TypeError(
-        `Stage "${declaration.id}" declares conflicting contracts for "${selection.pointer}".`,
-      );
-    }
-    pointers.set(selection.pointer, selection.contract);
-    return { name, parse, selection };
-  });
-
-  const run: StageFunction = (context) => {
-    const selected = Object.freeze(
-      Object.fromEntries(
-        typedInputs.map(({ name, parse, selection }) => [
-          name,
-          parse(context.inputs[selection.pointer], selection.pointer),
-        ]),
-      ),
-    ) as TypedInputs<Inputs>;
-    return declaration.run({
-      dependencies: context.dependencies as DependencyOutputs<Dependencies>,
-      inputs: selected,
-      env: context.env as TypedEnvironment<Influences>,
-    });
-  };
-  const normalized: StageDeclaration = Object.freeze({
-    id: declaration.id,
-    dependsOn: Object.freeze(declaration.dependsOn.map(({ id }) => id)),
-    implementation: declaration.cache.revision,
-    watch: declaration.cache.files,
-    inputs: Object.freeze([...pointers.keys()]),
-    inputContracts: Object.freeze(Object.fromEntries(pointers)),
-    env: declaration.cache.environment,
-    ...(declaration.cache.mode === "volatile"
-      ? { cache: false as const, volatile: true as const }
-      : declaration.cache.mode === "cacheable"
-        ? { cache: true as const }
-        : { cache: false as const }),
-    run,
-  });
-  const handle: StageHandle<Id, Output> = Object.freeze({ id: declaration.id });
-  declarations.set(handle, normalized);
+export function stage<
+  D extends DependencyBindings = Record<never, never>,
+  I extends JsonObject = JsonObject,
+  O extends JsonValue = JsonValue,
+>(options: StageOptions<D, I, O>): StageHandle<O> {
+  if (!options || typeof options.run !== "function") invalid("A stage requires a callback.");
+  if (!validId(options.id)) invalid("Invalid stage identifier.");
+  const handle = Object.freeze({ id: options.id });
+  // Registration retains ordinary declarations for the future preparation snapshot.
+  declarations.set(handle, options as unknown as StageMetadata);
   return handle;
 }
-
-/**
- * Seals a complete workflow from typed handles. Graph validation is shared with the fluent API.
- */
-export function createWorkflow(options: ComposedWorkflowOptions): BuiltWorkflow {
-  const builder = defineWorkflow({ id: options.id, root: options.root });
-  for (const handle of options.stages) {
-    const declaration = declarations.get(handle);
-    if (declaration === undefined) {
-      throw new TypeError(`Stage handle "${handle.id}" was not created by defineStage().`);
+export function workflowDeclarations(workflow: Workflow): StageMetadata[] {
+  const handles = workflows.get(workflow);
+  if (!handles) invalid("Workflow was not assembled by createWorkflow.");
+  return normalizeDeclarations(handles);
+}
+function normalizeDeclarations(handles: readonly StageHandle[]): StageMetadata[] {
+  return handles.map((handle) => {
+    const options = declarations.get(handle);
+    if (!options) invalid("Unregistered stage handle.");
+    const dependencies = options.dependencies === undefined ? {} : options.dependencies;
+    if (!plainObject(dependencies)) invalid("Dependencies must be an ordinary binding map.");
+    const inputs = options.inputs === undefined ? {} : options.inputs;
+    if (!plainObject(inputs)) invalid("Inputs must be an ordinary JSON object.");
+    const environment = options.environment === undefined ? [] : options.environment;
+    if (!Array.isArray(environment) || [...environment].some((name) => typeof name !== "string"))
+      invalid("Environment must be an array of names.");
+    for (const [name, target] of Object.entries(dependencies)) {
+      if (!name || !declarations.has(target) || !handles.includes(target))
+        invalid("Invalid or out-of-graph dependency binding.");
     }
-    builder.stage(declaration);
+    const reuse = options.reuse === undefined ? false : options.reuse;
+    if (reuse !== false && !plainObject(reuse))
+      invalid("Reuse must be false or ordinary metadata.");
+    if (reuse !== false) {
+      const files = reuse.files === undefined ? [] : reuse.files;
+      if (!Array.isArray(files)) invalid("Reuse files must be an array.");
+      if (
+        (reuse.revision !== undefined &&
+          (typeof reuse.revision !== "string" || !reuse.revision.trim())) ||
+        (!reuse.revision && !files.length) ||
+        new Set(files).size !== files.length ||
+        [...files].some((p) => typeof p !== "string" || !p.trim())
+      )
+        invalid("Reuse requires nonempty revision or unique files.");
+    }
+    return {
+      id: handle.id,
+      dependencies: Object.fromEntries(Object.entries(dependencies)),
+      inputs: copyInputs(inputs, handle.id),
+      environment: [...environment],
+      reuse: reuse === false ? false : { ...reuse, files: [...(reuse.files ?? [])] },
+      run: options.run,
+    };
+  });
+}
+export function createWorkflow(options: {
+  id: string;
+  root: string;
+  stages: readonly StageHandle[];
+}): Workflow {
+  if (!validId(options.id)) invalid("Invalid workflow identifier.");
+  for (const handle of options.stages)
+    if (!declarations.has(handle)) invalid("Unregistered stage handle.");
+  const handles = [...options.stages];
+  const metadata = normalizeDeclarations(handles);
+  const builder = defineWorkflow({ id: options.id, root: options.root });
+  for (const item of metadata)
+    builder.stage({
+      id: item.id,
+      dependsOn: [...new Set(Object.values(item.dependencies).map((h) => h.id))],
+      implementation: "declared",
+      watch: [],
+      inputs: [],
+      env: item.environment,
+      cache: false,
+      run: () => null,
+    });
+  try {
+    const normalized = builder.build();
+    const workflow = Object.freeze({
+      id: normalized.id,
+      root: normalized.root,
+      topologicalOrder: normalized.topologicalOrder,
+    });
+    workflows.set(workflow, handles);
+    return workflow;
+  } catch (error) {
+    invalid(error instanceof Error ? error.message : "Invalid graph.");
   }
-  return builder.build();
 }

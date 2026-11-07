@@ -14,6 +14,7 @@ export type ErrorContext = {
 
 export type AbilityBenchErrorCode =
   | "invalid_argument"
+  | "invalid_declaration"
   | "invalid_json_value"
   | "history_not_found"
   | "run_not_found"

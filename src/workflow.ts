@@ -254,18 +254,20 @@ function validateUnique(
 }
 
 function topologicalSort(stages: readonly StageDefinition[]): string[] {
+  const rank = new Map(stages.map((stage, index) => [stage.id, index]));
+  const compareDeclaration = (left: string, right: string) =>
+    (rank.get(left) ?? 0) - (rank.get(right) ?? 0);
   const byId = new Map(stages.map((stage) => [stage.id, stage]));
   const indegree = new Map(stages.map((stage) => [stage.id, stage.dependencyIds.length]));
   const dependents = new Map(stages.map((stage) => [stage.id, [] as string[]]));
   for (const stage of stages) {
     for (const dependency of stage.dependencyIds) dependents.get(dependency)?.push(stage.id);
   }
-  for (const values of dependents.values()) values.sort(compareIds);
 
   const ready = stages
     .filter(({ id }) => indegree.get(id) === 0)
     .map(({ id }) => id)
-    .sort(compareIds);
+    .sort(compareDeclaration);
   const order: string[] = [];
   while (ready.length > 0) {
     const id = ready.shift();
@@ -274,7 +276,10 @@ function topologicalSort(stages: readonly StageDefinition[]): string[] {
     for (const dependent of dependents.get(id) ?? []) {
       const next = (indegree.get(dependent) ?? 0) - 1;
       indegree.set(dependent, next);
-      if (next === 0) insertSorted(ready, dependent);
+      if (next === 0) {
+        ready.push(dependent);
+        ready.sort(compareDeclaration);
+      }
     }
   }
 
@@ -310,11 +315,6 @@ function findCycle(stages: ReadonlyMap<string, StageDefinition>): string[] {
     if (cycle !== undefined) return cycle;
   }
   return [];
-}
-
-function insertSorted(values: string[], value: string): void {
-  const index = values.findIndex((current) => compareIds(value, current) < 0);
-  index === -1 ? values.push(value) : values.splice(index, 0, value);
 }
 
 function compareIds(left: string, right: string): number {
