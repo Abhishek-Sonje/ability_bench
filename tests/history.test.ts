@@ -1,86 +1,17 @@
 // biome-ignore-all lint/complexity/useLiteralKeys: Malformed schema fixtures use index signatures.
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { rm, writeFile } from "node:fs/promises";
+
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { openHistory } from "../src/index.js";
 
-const roots: string[] = [];
-afterEach(async () => {
-  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-});
+import { fixture } from "./fixtures/history-fixture.js";
+
+const time = "2026-11-08T00:00:00.000Z";
+const header = "abilitybench-artifact-v2\nordered-json-v1\nsha256-domain-v2\n";
 const digest = (domain: string, bytes: string) =>
   `sha256:${createHash("sha256").update(`${domain}\0`).update(bytes).digest("hex")}`;
-const time = "2026-11-08T00:00:00.000Z";
-const attemptId = "12345678-1234-4234-8234-123456789abc";
-const header = "abilitybench-artifact-v2\nordered-json-v1\nsha256-domain-v2\n";
-
-// Independently assembled disk bytes: no production writer/codec/schema helper.
-async function fixture(payload = '{"z":[2,1],"a":null}') {
-  const root = await mkdtemp(join(tmpdir(), "abilitybench history "));
-  roots.push(root);
-  const hash = digest("abilitybench/artifact/v2", header + payload);
-  const output = {
-    artifactSchema: "abilitybench-artifact-v2",
-    codec: "ordered-json-v1",
-    hashScheme: "sha256-domain-v2",
-    hash,
-    byteLength: Buffer.byteLength(payload),
-    observedAt: time,
-    origin: { attemptId, stageId: "source" },
-  };
-  const body: Record<string, unknown> & { stages: Record<string, unknown>[] } = {
-    schemaVersion: "abilitybench-run-v2",
-    codec: "ordered-json-v1",
-    hashScheme: "sha256-domain-v2",
-    fingerprintContract: "declared-influences-v2",
-    attemptId,
-    workflowId: "example",
-    startedAt: time,
-    finalizedAt: time,
-    status: "completed",
-    baseline: null,
-    failureMode: "fail-fast",
-    refresh: { scope: "selected", stageIds: [] },
-    stages: [
-      {
-        stageId: "source",
-        dependencies: [],
-        policy: "always-execute",
-        preview: { decision: "execute", reason: "reuse_not_enabled", details: {} },
-        actual: { decision: "execute", reason: "reuse_not_enabled", details: {} },
-        status: "succeeded",
-        fingerprint: null,
-        components: null,
-        output,
-        error: null,
-      },
-    ],
-  };
-  const save = async () => {
-    const recordHash = digest("abilitybench/run/v2", JSON.stringify(body));
-    const id = `run_${recordHash.slice(7)}`;
-    const { schemaVersion, codec, hashScheme, fingerprintContract, ...rest } = body;
-    const record = {
-      schemaVersion,
-      codec,
-      hashScheme,
-      fingerprintContract,
-      id,
-      recordHash,
-      ...rest,
-    };
-    await mkdir(join(root, "runs"), { recursive: true });
-    await writeFile(join(root, "runs", `${id}.json`), JSON.stringify(record));
-    return id;
-  };
-  await mkdir(join(root, "objects", "abilitybench-artifact-v2", "sha256"), { recursive: true });
-  const artifact = join(root, "objects", "abilitybench-artifact-v2", "sha256", hash.slice(7));
-  await writeFile(artifact, header + payload);
-  return { root, body, save, artifact, stage: body.stages[0] as Record<string, unknown> };
-}
-
 it("reads selected ordered output as fresh mutable JSON without declarations", async () => {
   const f = await fixture();
   const id = await f.save();
@@ -430,4 +361,181 @@ it("rejects duplicate record keys, malformed UTF-8, hash mismatch and truncation
     expect(await fs.readFile(f.artifact)).toEqual(bytes);
     expect(await fs.readFile(file, "utf8")).toBe(saved);
   }
+});
+
+it("lists verified summaries and distinguishes empty from missing history", async () => {
+  const f = await fixture();
+  expect(await openHistory(f.root).runs()).toEqual([]);
+  const id = await f.save();
+  expect(await openHistory(f.root).runs()).toEqual([
+    expect.objectContaining({
+      id,
+      workflowId: "example",
+      finalizedAt: time,
+      status: "completed",
+      baseline: null,
+      schemaVersion: "abilitybench-run-v2",
+    }),
+  ]);
+  expect(await openHistory(f.root).runs({ workflowId: "other" })).toEqual([]);
+  await expect(openHistory(join(f.root, "missing")).runs()).rejects.toMatchObject({
+    code: "history_not_found",
+  });
+});
+
+it.each([
+  ["null", "null", null],
+  ["1", "2", { path: "", reason: "value" }],
+  ["1", '"1"', { path: "", reason: "type" }],
+  ['{"a":0,"b":1}', '{"b":2,"a":0}', { path: "", reason: "object_order" }],
+  ['{"a":0}', '{"b":0}', { path: "", reason: "object_keys" }],
+  ['{"a/b~":[1]}', '{"a/b~":[2]}', { path: "/a~1b~0/0", reason: "value" }],
+  ["[0]", "[1,2]", { path: "", reason: "array_length" }],
+])("compares complete ordered values %s and %s", async (left, right, difference) => {
+  const f = await fixture(left);
+  const a = await f.save();
+  const g = await fixture(right);
+  const b = await g.save();
+  const fs = await import("node:fs/promises");
+  await fs.cp(g.root, f.root, { recursive: true });
+  expect(await openHistory(f.root).compare(a, b, "source")).toEqual({
+    left: { runId: a, stageId: "source" },
+    right: { runId: b, stageId: "source" },
+    equal: difference === null,
+    difference,
+  });
+});
+
+it("validates both identical selections and reports the unavailable side", async () => {
+  const f = await fixture();
+  const id = await f.save();
+  expect((await openHistory(f.root).compare(id, id, "source")).equal).toBe(true);
+  await rm(f.artifact);
+  await expect(openHistory(f.root).compare(id, id, "source")).rejects.toMatchObject({
+    code: "artifact_not_found",
+    side: "left",
+    operation: "compare",
+  });
+});
+it("sorts recorded timestamps and IDs, validates limits and scans before filtering", async () => {
+  const f = await fixture();
+  const a = await f.save();
+  f.body["workflowId"] = "other";
+  const b = await f.save();
+  expect((await openHistory(f.root).runs()).map((r) => r.id)).toEqual([a, b].sort().reverse());
+  f.body["finalizedAt"] = "2026-11-09T00:00:00.000Z";
+  const c = await f.save();
+  expect((await openHistory(f.root).runs({ limit: 1 })).map((r) => r.id)).toEqual([c]);
+  for (const limit of [0, -1, 1.2, 1001, NaN])
+    await expect(openHistory(f.root).runs({ limit })).rejects.toMatchObject({
+      code: "invalid_argument",
+    });
+  await writeFile(join(f.root, "runs", `${b}.json`), "{}");
+  await expect(openHistory(f.root).runs({ workflowId: "example", limit: 1 })).rejects.toMatchObject(
+    { code: "corrupt_record" },
+  );
+});
+it("accepts 1000 records, refuses 1001 and retains direct access", async () => {
+  const f = await fixture();
+  const ids: string[] = [];
+  for (let i = 0; i < 1000; i++) {
+    f.body["workflowId"] = `workflow-${i}`;
+    ids.push(await f.save());
+  }
+  expect(await openHistory(f.root).runs()).toHaveLength(20);
+  expect(await openHistory(f.root).runs({ limit: 1000 })).toHaveLength(1000);
+  f.body["workflowId"] = "workflow-extra";
+  const id = await f.save();
+  await expect(openHistory(f.root).runs({ workflowId: "absent", limit: 1 })).rejects.toMatchObject({
+    code: "read_limit_exceeded",
+    limit: 1000,
+  });
+  expect((await openHistory(f.root).run(id)).id).toBe(id);
+  expect(await openHistory(f.root).output(id, "source")).toEqual({ z: [2, 1], a: null });
+}, 30000);
+
+it("rejects null limits and malformed runtime options with coded errors", async () => {
+  const f = await fixture();
+  // @ts-expect-error JavaScript callers can pass null.
+  await expect(openHistory(f.root).runs({ limit: null })).rejects.toMatchObject({
+    code: "invalid_argument",
+  });
+  // @ts-expect-error JavaScript callers can pass null.
+  await expect(openHistory(f.root).runs(null)).rejects.toMatchObject({ code: "invalid_argument" });
+});
+
+it("identifies a corrupt right artifact and never equates absent outputs", async () => {
+  const f = await fixture("null");
+  const a = await f.save();
+  const g = await fixture("true");
+  const b = await g.save();
+  const fs = await import("node:fs/promises");
+  await fs.cp(g.root, f.root, { recursive: true });
+  await writeFile(
+    join(
+      f.root,
+      "objects",
+      "abilitybench-artifact-v2",
+      "sha256",
+      (g.stage["output"] as { hash: string }).hash.slice(7),
+    ),
+    "broken",
+  );
+  await expect(openHistory(f.root).compare(a, b, "source")).rejects.toMatchObject({
+    code: "corrupt_artifact",
+    side: "right",
+  });
+  f.body["status"] = "failed";
+  Object.assign(f.stage, {
+    status: "failed",
+    output: null,
+    error: { code: "callback_failed", message: "fixture", operation: "execute" },
+    actual: {
+      decision: "execute",
+      reason: "reuse_not_enabled",
+      details: { callbackInvoked: true },
+    },
+  });
+  const failed = await f.save();
+  await expect(openHistory(f.root).compare(failed, failed, "source")).rejects.toMatchObject({
+    code: "output_absent",
+    side: "left",
+    status: "failed",
+  });
+});
+it("compares successful output from a failed chain without ancestor reads", async () => {
+  const f = await fixture();
+  const a = await f.save();
+  f.body["status"] = "failed";
+  f.body["baseline"] = {
+    runId: `run_${"a".repeat(64)}`,
+    recordHash: `sha256:${"a".repeat(64)}`,
+    schemaVersion: "abilitybench-run-v2",
+    status: "failed",
+  };
+  f.body.stages.push({
+    ...f.stage,
+    stageId: "broken",
+    status: "failed",
+    output: null,
+    error: { code: "callback_failed", message: "fixture", operation: "execute" },
+    actual: {
+      decision: "execute",
+      reason: "reuse_not_enabled",
+      details: { callbackInvoked: true },
+    },
+  });
+  const b = await f.save();
+  expect((await openHistory(f.root).compare(a, b, "source")).equal).toBe(true);
+});
+it("refuses invalid run filenames and unknown scanned formats", async () => {
+  const f = await fixture();
+  const id = await f.save();
+  await writeFile(join(f.root, "runs", "run_invalid.json"), "{}");
+  await expect(openHistory(f.root).runs()).rejects.toMatchObject({ code: "corrupt_record" });
+  await rm(join(f.root, "runs", "run_invalid.json"));
+  await writeFile(join(f.root, "runs", `${id}.json`), '{"schemaVersion":"abilitybench-run-v9"}');
+  await expect(openHistory(f.root).runs()).rejects.toMatchObject({
+    code: "unsupported_history_format",
+  });
 });

@@ -196,7 +196,7 @@ The build cleans only generated root `dist/` before emitting supported internals
 preventing retired CLI/viewer/evaluation files from surviving an incremental build.
 Package files are allowlisted to compiled JavaScript/types and README. Package exports
 permit only the root entrypoint. Final identity, licensing/notices, supported runtime
-exports, CLI installation and clean-consumer qualification belong to #21/#24.
+exports, broader clean-consumer qualification belongs to #21/#24; installed history CLI checks are in #15.
 
 ## Private historical prototype
 
@@ -240,7 +240,48 @@ CLI as those entrypoints become available.
 | Composio / Archie / Gemini | Original provider code, offline guardrails, renderer/domain fixtures and required-effect checks retained privately | Mandatory capture orchestration, old policy and presentation-order reconstruction stay historical; original-renderer/provider witness in #22 with SDK behavior from #12–#18 |
 | Viewer / evaluation / diff | Shared artifact/record corruption, ID, physical-containment and immutable-storage checks run independently of these features | Full deferred suites including independent-reader cases stay private; bounded independent history/comparison replaces lineage/completed-pair/preview/evaluator restrictions in #12/#15/#16 |
 
-No behavioral slice after #14 is claimed complete here. Retained sorted codec, old graph,
+The history browsing/comparison slice #15 is implemented; later slices remain pending. Retained sorted codec, old graph,
 fingerprint/execution helpers and phase-0 records are temporary private
 expand/retain/migrate boundaries so useful checks remain green while later tickets
 replace behavior. There is no second coordinator, module-count or code-reduction goal.
+
+## Independent history SDK and CLI
+
+`openHistory(directory)` needs only retained history. Its asynchronous `runs({workflowId?, limit?})`,
+`run(runId)`, `output(runId, stageId)` and `compare(runA, runB, stageId)` never load workflow,
+configuration, provider or evaluator code or repair history. Inspection includes dependencies,
+baseline, separate preview/actual reasons, failures/skips and `outputReferences: "unchecked"`.
+Successful outputs in failed runs and chains remain readable without ancestors. Each read returns
+independent mutable JSON. Application validators judge domain validity and quality.
+
+The installed `abilitybench` binary supports exactly:
+
+```sh
+abilitybench runs --history "history directory" --workflow research-report --limit 20
+abilitybench inspect RUN --history "history directory" --json
+abilitybench output RUN report --history "history directory" > before.json
+abilitybench compare RUN_A RUN_B report --history "history directory" --json
+```
+
+All four commands accept `--history` (default `./.abilitybench`) and `--json`.
+`output` always prints complete pretty JSON in recorded order, including with `--json`, without
+an envelope. Export two outputs and use an existing text diff tool for detailed changes.
+Exit status is 0 for success/equal, 1 for different, 2 for usage/read failure. Errors go only to
+stderr and use `{error:{code,message,operation,...context}}` with `--json`. Automation must check
+the exit code: shell redirection may create an empty destination on failure.
+
+Comparison verifies both complete selected outputs, even for identical selections/references.
+It accepts unrelated, same-run, cross-workflow, failed and chained runs. It returns selected
+`left`/`right` identities, `equal`, and `difference: null` or one `{path,reason}`. Reasons are
+`type`, `value`, `object_keys`, `object_order`, `array_length`; array item differences recurse.
+JSON Pointers escape `~` and `/`; the root is `""`. Object key sets precede order and values;
+array length precedes items. Equality is no quality, freshness or reuse verdict.
+
+Listing scans incrementally, validates every scanned record before filtering and fails on the
+1,001st entry. Results default to 20, allow positive integer limits up to 1,000, and sort by
+recorded finalization time then ID descending. Existing empty history lists `[]`; missing history
+fails. Direct known-run/output reads bypass the scan cap. All entries in `runs/` must be committed
+record filenames; private staging, writer-lock and quarantine directories outside `runs/` are not
+scanned. Corrupt, unreadable or unknown records fail explicitly. Record reads are bounded at
+2 MiB and output payloads at 16 MiB, enforced during actual reads. No truncation or limit override.
+Mixed phase-0 format dispatch remains assigned to #16; this slice reads the ordered format.

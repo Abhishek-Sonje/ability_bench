@@ -42,5 +42,8 @@
     "dist/*.js",
     "dist/*.d.ts",
     "README.md"
-  ]
+  ],
+  "bin": {
+    "abilitybench": "./dist/cli.js"
+  }
 }

@@ -1,5 +1,7 @@
 import { resolve } from "node:path";
 import { AbilityBenchError } from "./errors.js";
+import { type Comparison, firstDifference } from "./history-compare.js";
+import { listRuns, type RunSummary, type RunsOptions } from "./history-list.js";
 import { type RecordedRun, RUN_ID, readOutput, readRun, validId } from "./recorded-data.js";
 import type { JsonValue } from "./types.js";
 
@@ -7,7 +9,9 @@ export interface RunInspection extends RecordedRun {
   outputReferences: "unchecked";
 }
 export interface History {
+  runs(options?: RunsOptions): Promise<RunSummary[]>;
   run(runId: string): Promise<RunInspection>;
+  compare(runA: string, runB: string, stageId: string): Promise<Comparison>;
   output(runId: string, stageId: string): Promise<JsonValue>;
 }
 export function openHistory(historyDirectory: string): History {
@@ -21,9 +25,36 @@ export function openHistory(historyDirectory: string): History {
       });
   }
   return {
+    runs: (options) => listRuns(root, options),
+    async compare(runA, runB, stageId) {
+      const selected = async (runId: string, side: "left" | "right") => {
+        try {
+          return await openHistory(root).output(runId, stageId);
+        } catch (error) {
+          if (error instanceof AbilityBenchError)
+            throw new AbilityBenchError(error.code, error.message, "compare", {
+              ...error.context,
+              side,
+            });
+          throw error;
+        }
+      };
+      const left = await selected(runA, "left");
+      const right = await selected(runB, "right");
+      const difference = firstDifference(left, right);
+      return {
+        left: { runId: runA, stageId },
+        right: { runId: runB, stageId },
+        equal: difference === null,
+        difference,
+      };
+    },
     async run(runId) {
       checkRun(runId, "run");
-      return { ...(await readRun(root, runId, "run", { runId })), outputReferences: "unchecked" };
+      return {
+        ...(await readRun(root, runId, "run", { runId })),
+        outputReferences: "unchecked",
+      };
     },
     async output(runId, stageId) {
       checkRun(runId, "output");

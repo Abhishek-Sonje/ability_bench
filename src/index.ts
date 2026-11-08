@@ -9,6 +9,8 @@ export type {
 export { prepare } from "./execution.js";
 export type { History, RunInspection } from "./history.js";
 export { openHistory } from "./history.js";
+export type { Comparison, Difference } from "./history-compare.js";
+export type { RunSummary, RunsOptions } from "./history-list.js";
 export type {
   DependencyBindings,
   DependencyOutputs,
