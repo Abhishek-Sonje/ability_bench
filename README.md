@@ -5,10 +5,11 @@ for local TypeScript workflows. The authoritative release contract is
 [specification #10](https://github.com/Abhishek-Sonje/ability_bench/issues/10).
 
 This checkout implements isolated supported sources (#11), selected ordered-history
-reads (#12), and fresh typed execution (#13). It is an intermediate private development
-version, not a qualified 0.1.0 release. The root exports `stage`, `createWorkflow`,
-`prepare`, `openHistory`, `AbilityBenchError` and their associated types. Retained
-baseline selection/reuse, refresh, repair, history listing/comparison, legacy-format
+reads (#12), fresh typed execution (#13), and explicit retained-baseline reuse (#14).
+It is an intermediate private development version, not a qualified 0.1.0 release.
+The root exports `stage`, `createWorkflow`, `prepare`, `openHistory`, `AbilityBenchError`
+and their associated types. Opt-in
+latest selection, refresh, repair, history listing/comparison, legacy-format
 reading and the four-command CLI belong to subsequent tickets.
 
 ```ts
@@ -32,8 +33,11 @@ const prepared = await prepare(workflow, { baseline: null });
 console.log(prepared.preview); // callback-free; creates no run state
 const result = await prepared.execute(); // single-use, including after rejection
 if (result.status === "failed") process.exitCode = 1;
+const retained = await prepare(workflow, { baseline: { runId: result.runId } });
+console.log(retained.preview); // research can reuse; report always executes when reached
+const next = await retained.execute();
 const saved = await openHistory(`${import.meta.dirname}/.abilitybench`)
-  .output(result.runId, "report");
+  .output(next.runId, "report");
 ```
 
 The callbacks above are your existing application functions. Stage dependencies are
@@ -43,16 +47,49 @@ references and cycles. Available traversal ties follow stage declaration order.
 Ordinary inputs and metadata need no factories or schema language; keep application
 validators for domain configuration and provider responses.
 
-`baseline: null` deliberately executes fresh. Other baseline forms currently reject.
+`baseline: null` deliberately executes fresh. `{ runId }` selects exactly one retained,
+verified, compatible same-workflow run in the chosen history directory. Missing selection
+fails with `baseline_not_found`; a different workflow fails with
+`baseline_workflow_mismatch`; recognized old sorted history is `baseline_incompatible`.
+Unknown or corrupt formats fail verification. Preparation freezes this selection and
+shows its identity, format and completed/failed status in preview and finalized history.
+It never searches older runs for individual outputs or imports ancestor records.
+`"latest"` and refresh controls remain later-ticket work.
+
 Omitting `reuse`, or specifying `false`, means always execute when reached, with no
 fingerprint or stability obligation; its output remains inspectable. A reuse object
 requires nonempty `revision` or unique nonempty `files`, optionally both. In this
-fresh slice it records influences and checks file stability; it does not skip calls.
-Relative watches resolve under the workflow root; explicit absolute regular files
+slice eligible stages return verified recorded outputs without invoking callbacks.
+An always-execute baseline output cannot become reusable just by changing policy.
+Relative exact-file watches must remain under the workflow root; explicit absolute regular files
 outside it are allowed. Missing/non-file/unreadable watches appear in preview and
 fail the reached stage before its callback if still unavailable. Physical aliases
-into the selected history are refused. Restart/reload changed implementation;
+into the selected history and duplicate resolved watches are refused. Watched symlinks
+may resolve to external regular files. Restart/reload changed implementation;
 file hashes do not establish loaded-code identity or atomic snapshots.
+
+One eligibility calculation serves preview and execution. It checks the current opt-in,
+the selected baseline's successful/reused output and reusable policy, all declared
+component identities and artifact integrity. Preview invokes no callbacks or providers.
+When upstream actual output is unresolved, a potentially reusable descendant is
+`conditional`, with `unresolvedStages` and `potentialEligibility` in its details.
+Own known changes still predict execution. Preview remains separately recorded;
+actual decisions use actual outputs and new influence/artifact observations.
+Reasons retain applicable `causes`, named `changedComponents` with before/current
+digests, `changedBindings`, and watch/artifact error codes. Primary precedence is
+blocked/stopped, always-execute, fresh, missing/ineligible baseline, changed influences,
+unavailable artifact, reused. Failure error codes remain separate.
+
+Propagation compares whole ordered outputs, including object/array order and fields
+such as a provider's `requestHash`. Executing a dependency alone does not invalidate
+descendants: equal actual output can stop propagation directly or at an intermediate
+stage; independent branches keep their own identities. Reuse copies the original
+output reference, `observedAt` and origin, including through baseline chains. New
+observations use callback-completion time. Reuse retains an earlier mutable-source
+observation and skips the entire callback, including provider charges and incidental
+logs. It does not probe freshness, contact mutable sources, expire results or establish
+fresh-run equivalence. Required current-run publication belongs in a reached
+always-execute stage after reusable generation, or outside the engine.
 
 Preparation captures current declarations, options, full stage inputs and named
 environment presence/value. Later caller mutation cannot change that execution.
@@ -60,6 +97,12 @@ Each callback receives independent mutable input/dependency/environment copies.
 Accepted outputs are validated/copied before downstream consumption or persistence.
 Environment influence values are hashed, not stored as explanation metadata.
 Hidden closure reads and undeclared influences remain the developer's responsibility.
+Declare every relevant prompt/model/setting as stage inputs and every dependency
+binding, environment name, implementation revision and exact watched source/helper/prompt
+file. Bookkeeping names/physical paths normalize without sorting nested user values.
+Disk checks do not detect every A→B→A change or prove an atomic external observation.
+To resample now, deliberately execute fresh in this slice. Future refresh controls
+invoke existing acquisition code; code reading an old snapshot still reads that snapshot.
 
 History defaults to `<root>/.abilitybench`; `historyDirectory` can select an external
 directory. Default `failureMode: "fail-fast"` stops scheduling after failure;
@@ -197,7 +240,7 @@ CLI as those entrypoints become available.
 | Composio / Archie / Gemini | Original provider code, offline guardrails, renderer/domain fixtures and required-effect checks retained privately | Mandatory capture orchestration, old policy and presentation-order reconstruction stay historical; original-renderer/provider witness in #22 with SDK behavior from #12–#18 |
 | Viewer / evaluation / diff | Shared artifact/record corruption, ID, physical-containment and immutable-storage checks run independently of these features | Full deferred suites including independent-reader cases stay private; bounded independent history/comparison replaces lineage/completed-pair/preview/evaluator restrictions in #12/#15/#16 |
 
-No later behavioral slice is claimed complete here. Retained sorted codec, old graph,
+No behavioral slice after #14 is claimed complete here. Retained sorted codec, old graph,
 fingerprint/execution helpers and phase-0 records are temporary private
 expand/retain/migrate boundaries so useful checks remain green while later tickets
 replace behavior. There is no second coordinator, module-count or code-reduction goal.

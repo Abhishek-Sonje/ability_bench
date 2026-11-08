@@ -119,6 +119,7 @@ export function validateRun(value: unknown, runId: string): RecordedRun {
   )
     throw new AbilityBenchError("unsupported_history_format", "Unsupported run format.", "run", {
       runId,
+      ...(value["schemaVersion"] === "phase0-run-v1" ? { reason: "phase0-run-v1" } : {}),
     });
   keys(
     value,
@@ -433,7 +434,10 @@ export async function readRun(
     return validateRun(parseOrdered(bytes), runId);
   } catch (error) {
     if (error instanceof AbilityBenchError && error.code === "unsupported_history_format")
-      throw new AbilityBenchError(error.code, error.message, operation, context);
+      throw new AbilityBenchError(error.code, error.message, operation, {
+        ...context,
+        ...error.context,
+      });
     throw new AbilityBenchError(
       "corrupt_record",
       "Run failed schema or integrity verification.",

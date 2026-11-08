@@ -3,20 +3,23 @@ import { resolve } from "node:path";
 import { isPromise } from "node:util/types";
 import { AbilityBenchError } from "./errors.js";
 import { type PublicationSchedule, publish } from "./filesystem-store.js";
-import { type CapturedStage, observe } from "./influences.js";
+import { type CapturedStage, eligibility, observe } from "./influences.js";
 import {
   digest,
   HEADER,
   OUTPUT_LIMIT,
   type RecordedRun,
   type RecordedStage,
+  RUN_ID,
+  readOutput,
+  readRun,
 } from "./recorded-data.js";
 import { copyValue, orderedJson } from "./recorded-values.js";
 import { finalizeRecord } from "./run-manifest.js";
 import { type Workflow, workflowDeclarations } from "./typed-workflow.js";
 import type { JsonValue } from "./types.js";
 export interface PrepareOptions {
-  readonly baseline: null;
+  readonly baseline: null | { readonly runId: string };
   readonly historyDirectory?: string;
   readonly failureMode?: "fail-fast" | "continue-independent";
 }
@@ -25,7 +28,7 @@ export interface ExecutionResult extends RecordedRun {
 }
 export interface ExecutionPreview {
   workflowId: string;
-  baseline: null;
+  baseline: RecordedRun["baseline"];
   stages: { stageId: string; decision: string; reason: string; details: JsonValue }[];
 }
 export interface PreparedExecution {
@@ -39,13 +42,6 @@ function frozen<T>(value: T): T {
   }
   return value;
 }
-function selection(stage: CapturedStage): RecordedStage["preview"] {
-  return {
-    decision: "execute",
-    reason: stage.reuse === false ? "reuse_not_enabled" : "fresh",
-    details: {},
-  };
-}
 export async function prepare(
   workflow: Workflow,
   options: PrepareOptions,
@@ -58,10 +54,19 @@ export async function prepareExecution(
   options: PrepareOptions,
   schedule: PublicationSchedule = {},
 ): Promise<PreparedExecution> {
-  if (!options || !Object.hasOwn(options, "baseline") || options.baseline !== null)
+  if (
+    !options ||
+    !Object.hasOwn(options, "baseline") ||
+    (options.baseline !== null &&
+      (typeof options.baseline !== "object" ||
+        !options.baseline ||
+        Object.keys(options.baseline).length !== 1 ||
+        typeof options.baseline.runId !== "string" ||
+        !RUN_ID.test(options.baseline.runId)))
+  )
     throw new AbilityBenchError(
       "invalid_argument",
-      "This slice requires deliberate baseline:null.",
+      "Choose baseline:null or an exact retained {runId}.",
       "prepare",
     );
   if (
@@ -78,6 +83,7 @@ export async function prepareExecution(
   const history = resolve(options.historyDirectory ?? resolve(workflow.root, ".abilitybench"));
   const workflowId = workflow.id,
     root = workflow.root;
+  const baselineId = options.baseline?.runId;
   const graph = workflowDeclarations(workflow);
   const byId = new Map(graph.stages.map((stage) => [stage.id, stage]));
   const stages: CapturedStage[] = graph.order.map((id) => {
@@ -92,24 +98,98 @@ export async function prepareExecution(
       env: Object.fromEntries(item.environment.map((name) => [name, process.env[name]])),
     };
   });
+  let baseline: RecordedRun | null = null;
+  if (baselineId !== undefined) {
+    try {
+      baseline = await readRun(history, baselineId, "prepare", { runId: baselineId });
+    } catch (error) {
+      if (
+        error instanceof AbilityBenchError &&
+        error.code === "unsupported_history_format" &&
+        error.reason === "phase0-run-v1"
+      )
+        throw new AbilityBenchError(
+          "baseline_incompatible",
+          "Legacy history cannot supply an ordered baseline; use baseline:null for a deliberate fresh run.",
+          "prepare",
+          { runId: baselineId },
+        );
+      if (
+        error instanceof AbilityBenchError &&
+        ["history_not_found", "run_not_found"].includes(error.code)
+      )
+        throw new AbilityBenchError(
+          "baseline_not_found",
+          "Selected baseline is unavailable; use baseline:null for a deliberate fresh run.",
+          "prepare",
+          { runId: baselineId },
+        );
+      throw error;
+    }
+    if (baseline.workflowId !== workflowId)
+      throw new AbilityBenchError(
+        "baseline_workflow_mismatch",
+        "Selected baseline belongs to another workflow.",
+        "prepare",
+        { runId: baselineId },
+      );
+  }
+  const baselineSelection: RecordedRun["baseline"] = baseline
+    ? {
+        runId: baseline.id,
+        recordHash: baseline.recordHash,
+        schemaVersion: baseline.schemaVersion,
+        status: baseline.status,
+      }
+    : null;
   const diagnostics = new Map<string, AbilityBenchError>();
-  for (const item of stages)
+  const predictions = new Map<string, RecordedStage["preview"]>();
+  const predictedHashes = new Map<string, string>();
+  for (const item of stages) {
+    let components: Record<string, string> | null = null;
+    const unresolved = item.bindings
+      .filter((binding) => predictions.get(binding.stageId)?.decision !== "reuse")
+      .map((binding) => binding.stageId);
     if (item.reuse !== false)
       try {
-        await observe(item, root, history, new Map());
+        components = await observe(item, root, history, predictedHashes);
       } catch (error) {
         if (!(error instanceof AbilityBenchError)) throw error;
         diagnostics.set(item.id, error);
       }
+    let artifactError: AbilityBenchError | undefined;
+    const diagnostic = diagnostics.get(item.id);
+    const oldStage = baseline?.stages.find((s) => s.stageId === item.id);
+    const oldOutput = oldStage?.output;
+    if (item.reuse !== false && oldStage?.policy === "reusable" && oldOutput)
+      try {
+        await readOutput(history, oldOutput, "prepare", {
+          stageId: item.id,
+          runId: baselineId as string,
+        });
+      } catch (error) {
+        if (!(error instanceof AbilityBenchError)) throw error;
+        artifactError = error;
+      }
+    const prediction = eligibility(item, baseline, components, predictedHashes, {
+      unresolved: [...new Set(unresolved)],
+      artifactError,
+      influenceError: diagnostic,
+    });
+    predictions.set(item.id, prediction);
+    // A baseline output is only a hypothetical identity for unresolved upstream work.
+    if (oldOutput) predictedHashes.set(item.id, oldOutput.hash);
+  }
   const previews = stages.map((item) => ({
     stageId: item.id,
-    ...selection(item),
-    details: diagnostics.has(item.id)
-      ? { error: { code: diagnostics.get(item.id)?.code ?? "influence_unavailable" } }
-      : {},
+    ...(predictions.get(item.id) as RecordedStage["preview"]),
   }));
   const preview = frozen(
-    copyValue({ workflowId, baseline: null, stages: previews }) as unknown as ExecutionPreview,
+    copyValue({
+      workflowId,
+      baseline: baselineSelection,
+      stages: previews,
+    }) as unknown as ExecutionPreview,
   );
   let used = false;
   return Object.freeze({
@@ -133,7 +213,7 @@ export async function prepareExecution(
         const prior = previews.find((p) => p.stageId === item.id);
         const prediction = prior
           ? { decision: prior.decision, reason: prior.reason, details: prior.details }
-          : selection(item);
+          : eligibility(item, baseline, null, hashes);
         const blocked = item.bindings.some((binding) => failureDescendants.has(binding.stageId));
         const reason = blocked
           ? "dependency_blocked"
@@ -145,7 +225,7 @@ export async function prepareExecution(
           dependencies: item.bindings,
           policy: item.reuse === false ? "always-execute" : "reusable",
           preview: prediction,
-          actual: selection(item),
+          actual: eligibility(item, baseline, null, hashes),
           status: "succeeded",
           fingerprint: null,
           components: null,
@@ -156,7 +236,9 @@ export async function prepareExecution(
         if (reason) {
           record.status = "skipped";
           if (blocked) failureDescendants.add(item.id);
-          record.actual = { decision: "skip", reason, details: {} };
+          record.actual = eligibility(item, baseline, null, hashes, {
+            skipped: { reason, prediction },
+          });
           continue;
         }
         let callbackInvoked = false;
@@ -167,6 +249,30 @@ export async function prepareExecution(
               "abilitybench/fingerprint/declared-influences-v2",
               orderedJson({ workflowId, stageId: item.id, components: record.components }),
             );
+          }
+          record.actual = eligibility(item, baseline, record.components, hashes);
+          const oldStage = baseline?.stages.find((s) => s.stageId === item.id);
+          const oldOutput = oldStage?.output;
+          if (item.reuse !== false && oldStage?.policy === "reusable" && oldOutput) {
+            let reused: JsonValue | undefined;
+            try {
+              reused = await readOutput(history, oldOutput, "execute", {
+                stageId: item.id,
+                runId: baselineId as string,
+              });
+            } catch (error) {
+              if (!(error instanceof AbilityBenchError)) throw error;
+              record.actual = eligibility(item, baseline, record.components, hashes, {
+                artifactError: error,
+              });
+            }
+            if (record.actual.decision === "reuse") {
+              record.status = "reused";
+              record.output = oldOutput;
+              values.set(item.id, reused as JsonValue);
+              hashes.set(item.id, oldOutput.hash);
+              continue;
+            }
           }
           const dependencies = Object.fromEntries(
             item.bindings.map((binding) => [binding.name, copyValue(values.get(binding.stageId))]),
@@ -217,7 +323,15 @@ export async function prepareExecution(
           failed = true;
           failureDescendants.add(item.id);
           record.status = "failed";
-          record.actual.details = { callbackInvoked };
+          if (!callbackInvoked && item.reuse !== false)
+            record.actual = eligibility(item, baseline, record.components, hashes, {
+              influenceError: error instanceof AbilityBenchError ? error : undefined,
+            });
+          record.actual = {
+            ...record.actual,
+            decision: "execute",
+            details: { ...(record.actual.details as object), callbackInvoked },
+          };
           const coded =
             error instanceof AbilityBenchError
               ? error
@@ -239,7 +353,14 @@ export async function prepareExecution(
       }
       let runId: string | undefined;
       try {
-        const finalized = finalizeRecord(attemptId, workflowId, startedAt, failureMode, records);
+        const finalized = finalizeRecord(
+          attemptId,
+          workflowId,
+          startedAt,
+          failureMode,
+          records,
+          baselineSelection,
+        );
         runId = finalized.record.id;
         await publish(
           history,

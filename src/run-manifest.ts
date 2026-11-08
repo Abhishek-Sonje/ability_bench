@@ -13,6 +13,7 @@ export function finalizeRecord(
   startedAt: string,
   failureMode: string,
   stages: RecordedStage[],
+  baseline: RecordedRun["baseline"] = null,
 ): { record: RecordedRun; bytes: Buffer } {
   const versions = {
     schemaVersion: "abilitybench-run-v2",
@@ -27,7 +28,7 @@ export function finalizeRecord(
     startedAt,
     finalizedAt: new Date().toISOString(),
     status: stages.some((s) => s.status === "failed") ? "failed" : "completed",
-    baseline: null,
+    baseline,
     failureMode,
     refresh: { scope: "selected", stageIds: [] },
     stages,
