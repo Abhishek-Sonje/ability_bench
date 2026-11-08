@@ -27,7 +27,18 @@ export type AbilityBenchErrorCode =
   | "record_unreadable"
   | "unsupported_history_format"
   | "read_limit_exceeded"
-  | "unsafe_path";
+  | "unsafe_path"
+  | "prepared_execution_used"
+  | "influence_unavailable"
+  | "influence_changed_during_execution"
+  | "callback_failed"
+  | "output_limit_exceeded"
+  | "record_limit_exceeded"
+  | "content_collision"
+  | "storage_busy"
+  | "repair_refused"
+  | "publication_failed"
+  | "finalization_failed";
 
 export class AbilityBenchError extends Error {
   declare readonly runId?: string;

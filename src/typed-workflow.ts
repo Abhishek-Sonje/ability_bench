@@ -85,10 +85,14 @@ export function stage<
   declarations.set(handle, options as unknown as StageMetadata);
   return handle;
 }
-export function workflowDeclarations(workflow: Workflow): StageMetadata[] {
+export function workflowDeclarations(workflow: Workflow): {
+  stages: StageMetadata[];
+  order: readonly string[];
+} {
   const handles = workflows.get(workflow);
   if (!handles) invalid("Workflow was not assembled by createWorkflow.");
-  return normalizeDeclarations(handles);
+  const stages = normalizeDeclarations(handles);
+  return { stages, order: validateGraph(workflow.id, workflow.root, stages).topologicalOrder };
 }
 function normalizeDeclarations(handles: readonly StageHandle[]): StageMetadata[] {
   return handles.map((handle) => {
@@ -140,7 +144,17 @@ export function createWorkflow(options: {
     if (!declarations.has(handle)) invalid("Unregistered stage handle.");
   const handles = [...options.stages];
   const metadata = normalizeDeclarations(handles);
-  const builder = defineWorkflow({ id: options.id, root: options.root });
+  const normalized = validateGraph(options.id, options.root, metadata);
+  const workflow = Object.freeze({
+    id: normalized.id,
+    root: normalized.root,
+    topologicalOrder: normalized.topologicalOrder,
+  });
+  workflows.set(workflow, handles);
+  return workflow;
+}
+function validateGraph(id: string, root: string, metadata: StageMetadata[]) {
+  const builder = defineWorkflow({ id, root });
   for (const item of metadata)
     builder.stage({
       id: item.id,
@@ -153,14 +167,7 @@ export function createWorkflow(options: {
       run: () => null,
     });
   try {
-    const normalized = builder.build();
-    const workflow = Object.freeze({
-      id: normalized.id,
-      root: normalized.root,
-      topologicalOrder: normalized.topologicalOrder,
-    });
-    workflows.set(workflow, handles);
-    return workflow;
+    return builder.build();
   } catch (error) {
     invalid(error instanceof Error ? error.message : "Invalid graph.");
   }

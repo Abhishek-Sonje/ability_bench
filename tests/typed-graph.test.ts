@@ -1,3 +1,4 @@
+// biome-ignore-all lint/complexity/useLiteralKeys: TypeScript requires dictionary index access.
 import { expect, expectTypeOf, it } from "vitest";
 import { createWorkflow, stage } from "../src/index.js";
 

@@ -4,16 +4,100 @@ AbilityBench is being prepared as a recorded-result SDK and independent history 
 for local TypeScript workflows. The authoritative release contract is
 [specification #10](https://github.com/Abhishek-Sonje/ability_bench/issues/10).
 
-This checkout implements isolation [#11](https://github.com/Abhishek-Sonje/ability_bench/issues/11)
-and selected ordered-history reads [#12](https://github.com/Abhishek-Sonje/ability_bench/issues/12).
-It is an intermediate, private development version, not a qualified 0.1.0 release.
-The root entrypoint exposes `openHistory`, `AbilityBenchError`, `stage`,
-`createWorkflow` and their associated types. The declaration portion of #13 supports
-ordinary stage inputs/reuse metadata and typed dependency aliases, validating the
-complete graph without invoking callbacks. Independent traversal ties follow stage
-declaration order. `prepare` and durable execution are still unimplemented; #13
-remains open. Workflow execution, history listing/comparison, legacy-format reading and the
-four-command CLI arrive in subsequent tickets; retired runtime exports stay private.
+This checkout implements isolated supported sources (#11), selected ordered-history
+reads (#12), and fresh typed execution (#13). It is an intermediate private development
+version, not a qualified 0.1.0 release. The root exports `stage`, `createWorkflow`,
+`prepare`, `openHistory`, `AbilityBenchError` and their associated types. Retained
+baseline selection/reuse, refresh, repair, history listing/comparison, legacy-format
+reading and the four-command CLI belong to subsequent tickets.
+
+```ts
+import { stage, createWorkflow, prepare, openHistory } from "abilitybench";
+
+const research = stage({
+  id: "research",
+  inputs: { prompt: "Find useful options" },
+  environment: ["RESEARCH_ENDPOINT"],
+  reuse: { revision: "research-v1" },
+  run: async ({ inputs, env }) => existingResearch(inputs.prompt, env.RESEARCH_ENDPOINT),
+});
+const report = stage({
+  id: "report",
+  dependencies: { research },
+  run: ({ dependencies }) => existingReport(dependencies.research),
+});
+const workflow = createWorkflow({ id: "research-report", root: import.meta.dirname,
+  stages: [research, report] });
+const prepared = await prepare(workflow, { baseline: null });
+console.log(prepared.preview); // callback-free; creates no run state
+const result = await prepared.execute(); // single-use, including after rejection
+if (result.status === "failed") process.exitCode = 1;
+const saved = await openHistory(`${import.meta.dirname}/.abilitybench`)
+  .output(result.runId, "report");
+```
+
+The callbacks above are your existing application functions. Stage dependencies are
+registered handles keyed by nonempty binding names; multiple aliases are allowed.
+Graph validation rejects duplicate/unsafe IDs, forged/out-of-graph handles, self
+references and cycles. Available traversal ties follow stage declaration order.
+Ordinary inputs and metadata need no factories or schema language; keep application
+validators for domain configuration and provider responses.
+
+`baseline: null` deliberately executes fresh. Other baseline forms currently reject.
+Omitting `reuse`, or specifying `false`, means always execute when reached, with no
+fingerprint or stability obligation; its output remains inspectable. A reuse object
+requires nonempty `revision` or unique nonempty `files`, optionally both. In this
+fresh slice it records influences and checks file stability; it does not skip calls.
+Relative watches resolve under the workflow root; explicit absolute regular files
+outside it are allowed. Missing/non-file/unreadable watches appear in preview and
+fail the reached stage before its callback if still unavailable. Physical aliases
+into the selected history are refused. Restart/reload changed implementation;
+file hashes do not establish loaded-code identity or atomic snapshots.
+
+Preparation captures current declarations, options, full stage inputs and named
+environment presence/value. Later caller mutation cannot change that execution.
+Each callback receives independent mutable input/dependency/environment copies.
+Accepted outputs are validated/copied before downstream consumption or persistence.
+Environment influence values are hashed, not stored as explanation metadata.
+Hidden closure reads and undeclared influences remain the developer's responsibility.
+
+History defaults to `<root>/.abilitybench`; `historyDirectory` can select an external
+directory. Default `failureMode: "fail-fast"` stops scheduling after failure;
+`"continue-independent"` allows unaffected branches. Both retain successful outputs
+in a finalized failed run. Failure descendants are `dependency_blocked`; unrelated
+work stopped by fail-fast is `run_stopped`. Reasons and error codes are separate;
+failed outcomes record whether the callback was invoked. The engine adds no callback
+retry, rollback, transaction or exactly-once effect guarantee. Provider retry logic
+inside your callback stays yours. Fresh execution establishes neither application
+quality nor current-world freshness.
+
+Finalization allocates an attempt UUID before callbacks, then publishes accepted
+artifacts before the immutable finalized record. Ordinary stage failures return
+`status: "failed"` and `runId`. `finalization_failed` throws with allocated identity,
+limits/OS context where available and `status: "not_published" | "uncertain"`.
+An allocated identity is not an acknowledgment of saved history: after uncertain
+publication, direct history inspection can reconcile it. Prepare anew for another
+attempt; the rejected prepared object remains consumed.
+
+Writers stage exclusive same-volume files, close/reopen and boundedly verify them,
+then coordinate through the history-wide `writer-lock` directory with an owner token.
+Coordination waits at most five seconds before `storage_busy`; callbacks hold no lock.
+No-clobber hard links publish only complete verified inodes. Identical occupied data
+preserves its inode; collisions, corruption and unsafe/unreadable slots are refused.
+Only owned safe temps and the matching owner's lock are cleaned. Runs are immutable;
+this slice does not repair artifacts. Orphan staging files, lock and quarantine
+entries are not finalized runs. Readers never acquire locks or repair data.
+
+If a process stops with an abandoned lock, stop **all** users of that history and
+establish exclusive administrative ownership; age/PID guesses are insufficient.
+Inspect the owner and transaction evidence, verify any final slot first and preserve
+valid data. A missing slot may be linked from a still-verified staged replacement;
+otherwise leave it unavailable. Preserve quarantine and never rerun callbacks as
+storage recovery. Remove an abandoned lock only after ensuring its old process
+cannot resume, then prepare a new attempt. There is no automatic lock stealing,
+history rewriting or callback resumption. Support is local one-volume NTFS/ext4 with
+exclusive-create/hard-link capability, not hostile path replacement, network storage
+or power-loss durability.
 
 ```ts
 import { openHistory } from "abilitybench";

@@ -1,234 +1,281 @@
 import { randomUUID } from "node:crypto";
-import { link, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, open, realpath, rmdir, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
+import { AbilityBenchError } from "./errors.js";
+import {
+  type digest,
+  HEADER,
+  OUTPUT_LIMIT,
+  type OutputReference,
+  RECORD_LIMIT,
+  RUN_ID,
+  readBounded,
+  validateRun,
+  verifyOutput,
+} from "./recorded-data.js";
+import { orderedJson, parseOrdered } from "./recorded-values.js";
 
-import type { ArtifactStore } from "./artifact-store.js";
-import { type FinalizedRunManifest, freezeRunManifest, verifyRunManifest } from "./run-manifest.js";
-import { type ArtifactEnvelope, canonicalizeJson, decodeArtifact } from "./serialization.js";
-
-const ARTIFACT_HASH_PATTERN = /^sha256:([a-f0-9]{64})$/;
-const RUN_ID_PATTERN = /^run_([a-f0-9]{64})$/;
-const RUN_FILENAME_PATTERN = /^(run_[a-f0-9]{64})\.json$/;
-
-export type PersistenceErrorCode =
-  | "content_collision"
-  | "corrupt_artifact"
-  | "corrupt_manifest"
-  | "invalid_artifact_hash"
-  | "invalid_run_id"
-  | "read_failed"
-  | "write_failed";
-
-export class PersistenceError extends Error {
-  constructor(
-    readonly code: PersistenceErrorCode,
-    message: string,
-    readonly sourceCause?: unknown,
-  ) {
-    super(message, sourceCause === undefined ? undefined : { cause: sourceCause });
-    this.name = "PersistenceError";
-  }
+export interface Publication {
+  kind: "artifact" | "record";
+  identity: string;
+  bytes: Buffer;
+  reference?: OutputReference;
 }
-
-export class FileArtifactStore implements ArtifactStore {
-  readonly #root: string;
-
-  constructor(storageRoot: string) {
-    this.#root = resolve(storageRoot);
-  }
-
-  async get(contentHash: string): Promise<ArtifactEnvelope | undefined> {
-    const path = this.#pathForHash(contentHash);
-    let payload: Uint8Array;
-    try {
-      payload = Uint8Array.from(await readFile(path));
-    } catch (error: unknown) {
-      if (isNodeError(error) && error.code === "ENOENT") return undefined;
-      throw new PersistenceError("read_failed", `Unable to read artifact "${contentHash}".`, error);
-    }
-
-    const artifact: ArtifactEnvelope = Object.freeze({
-      schemaVersion: "phase0-artifact-v1",
-      codec: "canonical-json-v1",
-      contentHash,
-      byteLength: payload.byteLength,
-      payload,
-    });
-    try {
-      decodeArtifact(artifact);
-    } catch (error: unknown) {
-      throw new PersistenceError(
-        "corrupt_artifact",
-        `Artifact "${contentHash}" failed integrity verification.`,
-        error,
-      );
-    }
-    return artifact;
-  }
-
-  async put(artifact: ArtifactEnvelope): Promise<void> {
-    try {
-      decodeArtifact(artifact);
-    } catch (error: unknown) {
-      throw new PersistenceError(
-        "corrupt_artifact",
-        `Artifact "${artifact.contentHash}" failed integrity verification.`,
-        error,
-      );
-    }
-    const path = this.#pathForHash(artifact.contentHash);
-    await writeImmutable(path, artifact.payload, artifact.contentHash);
-  }
-
-  #pathForHash(contentHash: string): string {
-    const match = ARTIFACT_HASH_PATTERN.exec(contentHash);
-    if (match?.[1] === undefined) {
-      throw new PersistenceError(
-        "invalid_artifact_hash",
-        `Artifact hash "${contentHash}" is not a canonical SHA-256 identity.`,
-      );
-    }
-    return join(this.#root, "objects", "sha256", match[1]);
-  }
+// Private real-file schedule/fault seam, absent from package exports.
+export interface PublicationSchedule {
+  staged?: (file: string) => Promise<void>;
+  beforeOwner?: (lock: string) => Promise<void>;
+  locked?: (lock: string) => Promise<void>;
+  linked?: (file: string) => Promise<void>;
+  hashDigest?: typeof digest;
 }
-
-export class FileRunManifestStore {
-  readonly #root: string;
-
-  constructor(storageRoot: string) {
-    this.#root = resolve(storageRoot);
-  }
-
-  async get(runId: string): Promise<FinalizedRunManifest | undefined> {
-    const path = this.#pathForRun(runId);
-    let bytes: Uint8Array;
-    try {
-      bytes = await readFile(path);
-    } catch (error: unknown) {
-      if (isNodeError(error) && error.code === "ENOENT") return undefined;
-      throw new PersistenceError("read_failed", `Unable to read run "${runId}".`, error);
-    }
-
-    let manifest: FinalizedRunManifest;
-    try {
-      const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-      manifest = JSON.parse(text) as FinalizedRunManifest;
-      verifyRunManifest(manifest);
-      if (canonicalizeJson(manifest) !== text) {
-        throw new TypeError("Run manifest is not canonical JSON.");
-      }
-    } catch (error: unknown) {
-      throw new PersistenceError(
-        "corrupt_manifest",
-        `Run manifest "${runId}" failed integrity verification.`,
-        error,
-      );
-    }
-    if (manifest.id !== runId) {
-      throw new PersistenceError(
-        "corrupt_manifest",
-        `Run manifest at "${runId}" identifies itself as "${manifest.id}".`,
-      );
-    }
-    return freezeRunManifest(manifest);
-  }
-
-  async put(manifest: FinalizedRunManifest): Promise<void> {
-    try {
-      verifyRunManifest(manifest);
-    } catch (error: unknown) {
-      throw new PersistenceError(
-        "corrupt_manifest",
-        `Run manifest "${manifest.id}" failed integrity verification.`,
-        error,
-      );
-    }
-    const path = this.#pathForRun(manifest.id);
-    const bytes = new TextEncoder().encode(canonicalizeJson(manifest));
-    await writeImmutable(path, bytes, manifest.id);
-  }
-
-  async list(): Promise<readonly FinalizedRunManifest[]> {
-    let filenames: string[];
-    try {
-      filenames = await readdir(join(this.#root, "runs"));
-    } catch (error: unknown) {
-      if (isNodeError(error) && error.code === "ENOENT") return Object.freeze([]);
-      throw new PersistenceError("read_failed", "Unable to list stored runs.", error);
-    }
-
-    const manifests: FinalizedRunManifest[] = [];
-    for (const filename of filenames.sort()) {
-      const runId = RUN_FILENAME_PATTERN.exec(filename)?.[1];
-      if (runId === undefined) continue;
-      const manifest = await this.get(runId);
-      if (manifest === undefined) {
-        throw new PersistenceError("read_failed", `Run "${runId}" disappeared while listing.`);
-      }
-      manifests.push(manifest);
-    }
-    manifests.sort(
-      (left, right) =>
-        right.createdAt.localeCompare(left.createdAt) || left.id.localeCompare(right.id),
-    );
-    return Object.freeze(manifests);
-  }
-
-  #pathForRun(runId: string): string {
-    if (!RUN_ID_PATTERN.test(runId)) {
-      throw new PersistenceError(
-        "invalid_run_id",
-        `Run ID "${runId}" is not a content-addressed Phase 0 run ID.`,
-      );
-    }
-    return join(this.#root, "runs", `${runId}.json`);
-  }
+function osCode(error: unknown): string {
+  return error !== null && typeof error === "object" && "code" in error
+    ? String(error.code)
+    : "UNKNOWN";
 }
-
-export async function writeImmutable(
-  path: string,
-  bytes: Uint8Array,
-  identity: string,
-): Promise<void> {
-  const temporaryPath = join(dirname(path), `.tmp-${randomUUID()}`);
+async function directory(path: string): Promise<void> {
   try {
-    await mkdir(dirname(path), { recursive: true });
-    await writeFile(temporaryPath, bytes, { flag: "wx" });
+    await mkdir(path);
+  } catch (error) {
+    if (osCode(error) !== "EEXIST") throw error;
+  }
+  const info = await lstat(path);
+  if (!info.isDirectory() || info.isSymbolicLink())
+    throw new AbilityBenchError(
+      "unsafe_path",
+      "Storage directory must not be an alias.",
+      "publish",
+      { file: path },
+    );
+}
+async function layout(
+  root: string,
+  kind: Publication["kind"],
+): Promise<{ staging: string; destination: string }> {
+  // The selected history may have new parents; all private components are then checked individually.
+  await mkdir(dirname(root), { recursive: true });
+  await directory(root);
+  const staging = join(root, "staging");
+  await directory(staging);
+  if (kind === "record") {
+    await directory(join(root, "runs"));
+    return { staging, destination: join(root, "runs") };
+  }
+  let destination = root;
+  for (const part of ["objects", "abilitybench-artifact-v2", "sha256"]) {
+    destination = join(destination, part);
+    await directory(destination);
+  }
+  return { staging, destination };
+}
+function verify(candidate: Publication, bytes: Buffer, schedule: PublicationSchedule): void {
+  if (candidate.kind === "record") {
     try {
-      await link(temporaryPath, path);
-      return;
-    } catch (error: unknown) {
-      if (!(isNodeError(error) && (error.code === "EEXIST" || error.code === "EPERM"))) {
-        throw error;
-      }
-    }
-
-    const existing = await readFile(path);
-    if (!bytesEqual(existing, bytes)) {
-      throw new PersistenceError(
-        "content_collision",
-        `Immutable content "${identity}" already exists with different bytes.`,
+      validateRun(parseOrdered(bytes), candidate.identity);
+    } catch (error) {
+      if (error instanceof AbilityBenchError) throw error;
+      throw new AbilityBenchError(
+        "corrupt_record",
+        "Record failed schema or identity verification.",
+        "publish",
       );
     }
-  } catch (error: unknown) {
-    if (error instanceof PersistenceError) throw error;
-    throw new PersistenceError("write_failed", `Unable to persist "${identity}".`, error);
-  } finally {
-    try {
-      await unlink(temporaryPath);
-    } catch (error: unknown) {
-      if (!(isNodeError(error) && error.code === "ENOENT")) {
-        // A stale temp file is harmless and intentionally never treated as committed content.
-      }
-    }
+  } else {
+    if (!candidate.reference || candidate.reference.hash !== candidate.identity)
+      throw new AbilityBenchError("invalid_argument", "Missing artifact identity.", "publish");
+    verifyOutput(bytes, candidate.reference, "publish", {}, schedule.hashDigest);
   }
 }
-
-function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
-  if (left.byteLength !== right.byteLength) return false;
-  return left.every((value, index) => value === right[index]);
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && "code" in error;
+export async function publish(
+  rootDirectory: string,
+  candidate: Publication,
+  schedule: PublicationSchedule = {},
+): Promise<void> {
+  const artifact = candidate.kind === "artifact";
+  if (
+    !(artifact ? /^sha256:[a-f0-9]{64}$/.test(candidate.identity) : RUN_ID.test(candidate.identity))
+  )
+    throw new AbilityBenchError("invalid_argument", "Invalid publication identity.", "publish");
+  const limit = artifact ? OUTPUT_LIMIT + Buffer.byteLength(HEADER) : RECORD_LIMIT;
+  if (candidate.bytes.length > limit)
+    throw new AbilityBenchError(
+      artifact ? "output_limit_exceeded" : "record_limit_exceeded",
+      "Publication exceeds byte limit.",
+      "publish",
+      { limit, actualBytes: candidate.bytes.length },
+    );
+  verify(candidate, candidate.bytes, schedule);
+  const root = resolve(rootDirectory);
+  let temp: string | undefined;
+  let tempIdentity: { dev: number; ino: number } | undefined;
+  let token: string | undefined;
+  let preserve = false;
+  let primaryError: unknown;
+  let cleanupFailure: unknown;
+  const lock = join(root, "writer-lock");
+  const owner = join(lock, "owner.json");
+  try {
+    const paths = await layout(root, candidate.kind);
+    temp = join(paths.staging, `${randomUUID()}.tmp`);
+    const handle = await open(temp, "wx");
+    try {
+      tempIdentity = await handle.stat();
+      await handle.writeFile(candidate.bytes);
+    } finally {
+      await handle.close();
+    }
+    await schedule.staged?.(temp);
+    const staged = await readBounded(
+      root,
+      temp,
+      limit,
+      artifact ? "artifact" : "record",
+      "publish",
+      {},
+    );
+    verify(candidate, staged, schedule);
+    if (!staged.equals(candidate.bytes))
+      throw new AbilityBenchError("publication_failed", "Staged bytes changed.", "publish", {
+        file: temp,
+      });
+    const deadline = performance.now() + 5000;
+    while (true) {
+      try {
+        await mkdir(lock);
+        break;
+      } catch (error) {
+        if (osCode(error) !== "EEXIST") throw error;
+        if (performance.now() >= deadline)
+          throw new AbilityBenchError(
+            "storage_busy",
+            "History writer lock is occupied. Idle administrative recovery may be required.",
+            "publish",
+            { file: lock },
+          );
+        await delay(Math.min(25, Math.max(1, deadline - performance.now())));
+      }
+    }
+    // If this write fails, deliberately leave the lock blocked without an owned token.
+    await schedule.beforeOwner?.(lock);
+    const newToken = orderedJson({
+      uuid: randomUUID(),
+      pid: process.pid,
+      createdAt: new Date().toISOString(),
+    });
+    const ownerHandle = await open(owner, "wx");
+    try {
+      await ownerHandle.writeFile(newToken);
+    } finally {
+      await ownerHandle.close();
+    }
+    token = newToken;
+    await schedule.locked?.(lock);
+    const owned = await readBounded(root, owner, 4096, "record", "publish", {});
+    if (!owned.equals(Buffer.from(token)))
+      throw new AbilityBenchError("storage_busy", "Writer lock ownership changed.", "publish", {
+        file: lock,
+      });
+    const file = join(
+      paths.destination,
+      artifact ? candidate.identity.slice(7) : `${candidate.identity}.json`,
+    );
+    const occupied = async () => {
+      const bytes = await readBounded(
+        root,
+        file,
+        limit,
+        artifact ? "artifact" : "record",
+        "publish",
+        {},
+      );
+      verify(candidate, bytes, schedule);
+      if (!bytes.equals(staged)) {
+        preserve = true;
+        throw new AbilityBenchError(
+          "content_collision",
+          "Occupied content differs at the requested identity.",
+          "publish",
+          { file },
+        );
+      }
+    };
+    try {
+      await occupied();
+    } catch (error) {
+      if (
+        !(error instanceof AbilityBenchError) ||
+        !["artifact_not_found", "run_not_found"].includes(error.code)
+      )
+        throw error;
+      // Recheck the closed staged inode while holding the lock before committing it.
+      const current = await readBounded(
+        root,
+        temp,
+        limit,
+        artifact ? "artifact" : "record",
+        "publish",
+        {},
+      );
+      if (!current.equals(staged))
+        throw new AbilityBenchError(
+          "publication_failed",
+          "Staged bytes changed before publication.",
+          "publish",
+          { file: temp },
+        );
+      try {
+        await link(temp, file);
+      } catch (linkError) {
+        if (osCode(linkError) !== "EEXIST") throw linkError;
+      }
+      await occupied();
+      await schedule.linked?.(file);
+    }
+  } catch (error) {
+    primaryError = error;
+    if (error instanceof AbilityBenchError) throw error;
+    throw new AbilityBenchError("publication_failed", "Immutable publication failed.", "publish", {
+      causeCode: osCode(error),
+    });
+  } finally {
+    let cleanupError: unknown;
+    try {
+      if (token) {
+        const actual = await readBounded(root, owner, 4096, "record", "unlock", {}).catch(
+          () => null,
+        );
+        if (actual?.equals(Buffer.from(token))) {
+          await unlink(owner);
+          await rmdir(lock);
+        }
+      }
+    } catch (error) {
+      cleanupError = error;
+    }
+    try {
+      if (temp && tempIdentity && !preserve) {
+        const info = await lstat(temp).catch(() => null);
+        if (
+          info?.isFile() &&
+          !info.isSymbolicLink() &&
+          info.dev === tempIdentity.dev &&
+          info.ino === tempIdentity.ino &&
+          (await realpath(dirname(temp))) === join(await realpath(root), "staging")
+        )
+          await unlink(temp);
+      }
+    } catch (error) {
+      cleanupError ??= error;
+    }
+    cleanupFailure = cleanupError;
+  }
+  if (cleanupFailure && !primaryError)
+    throw new AbilityBenchError(
+      "publication_failed",
+      "Publication cleanup failed; history acknowledgment is uncertain.",
+      "publish",
+      { causeCode: osCode(cleanupFailure), file: lock },
+    );
 }

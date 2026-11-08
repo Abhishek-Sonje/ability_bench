@@ -1,191 +1,156 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-
-import { afterEach, describe, expect, it } from "vitest";
-import { executeWorkflow } from "../src/execution.js";
-import { FileArtifactStore, FileRunManifestStore } from "../src/filesystem-store.js";
-import { planWorkflow } from "../src/planning.js";
-import { finalizeRunManifest } from "../src/run-manifest.js";
-import { createArtifact } from "../src/serialization.js";
-import { defineWorkflow } from "../src/workflow.js";
+import { afterEach, expect, it } from "vitest";
+import { type Publication, publish } from "../src/filesystem-store.js";
+import { digest, HEADER } from "../src/recorded-data.js";
 
 const roots: string[] = [];
 afterEach(async () => {
-  await Promise.all(roots.splice(0).map((path) => rm(path, { recursive: true, force: true })));
+  await Promise.all(roots.splice(0).map((p) => rm(p, { recursive: true, force: true })));
 });
-
-async function temporaryRoot(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "abilitybench-storage-"));
-  roots.push(root);
-  return root;
+async function root() {
+  const p = await mkdtemp(join(tmpdir(), "abilitybench publish "));
+  roots.push(p);
+  return p;
 }
-
-async function manifestFixture(
-  storageRoot: string,
-  createdAt = "2026-09-23T00:00:00.000Z",
-  completedAt = "2026-09-23T00:00:01.000Z",
-) {
-  const workflowRoot = join(storageRoot, "project");
-  await mkdir(workflowRoot, { recursive: true });
-  await writeFile(join(workflowRoot, "stage.ts"), "v1\n", "utf8");
-  const workflow = defineWorkflow({ id: "filesystem-example", root: workflowRoot })
-    .stage({
-      id: "stage",
-      dependsOn: [],
-      implementation: "stage-v1",
-      watch: ["stage.ts"],
-      inputs: [],
-      env: [],
-      cache: true,
-      run: () => ({ persisted: true }),
-    })
-    .build();
-  const artifacts = new FileArtifactStore(storageRoot);
-  const plan = await planWorkflow({
-    workflow,
-    inputs: {},
-    environment: {},
-    baseline: null,
-    invalidate: [],
-  });
-  const execution = await executeWorkflow({
-    workflow,
-    plan,
-    inputs: {},
-    environment: {},
-    artifacts,
-  });
-  return finalizeRunManifest({
-    workflow,
-    execution,
-    createdAt,
-    completedAt,
-  });
+function candidate(payload = '{"z":2,"a":1}'): Publication {
+  const bytes = Buffer.from(HEADER + payload);
+  const hash = digest("abilitybench/artifact/v2", bytes);
+  return {
+    kind: "artifact",
+    identity: hash,
+    bytes,
+    reference: {
+      artifactSchema: "abilitybench-artifact-v2",
+      codec: "ordered-json-v1",
+      hashScheme: "sha256-domain-v2",
+      hash,
+      byteLength: Buffer.byteLength(payload),
+      observedAt: "2026-11-08T00:00:00.000Z",
+      origin: { attemptId: "12345678-1234-4234-8234-123456789abc", stageId: "stage" },
+    },
+  };
 }
-
-describe("filesystem artifact storage", () => {
-  it("writes once, deduplicates, and verifies artifacts when reading", async () => {
-    const root = await temporaryRoot();
-    const store = new FileArtifactStore(root);
-    const artifact = createArtifact({ stable: true });
-    await store.put(artifact);
-    await store.put(artifact);
-
-    const loaded = await store.get(artifact.contentHash);
-    expect(loaded).toEqual(artifact);
-    const objectDirectory = join(root, "objects", "sha256");
-    expect(await readdir(objectDirectory)).toEqual([artifact.contentHash.slice("sha256:".length)]);
+function slot(root: string, p: Publication) {
+  return join(root, "objects", "abilitybench-artifact-v2", "sha256", p.identity.slice(7));
+}
+it("publishes a closed verified hard link and preserves identical occupied inode", async () => {
+  const r = await root(),
+    p = candidate();
+  let stagedInode = 0;
+  await publish(r, p, {
+    staged: async (file) => {
+      stagedInode = (await stat(file)).ino;
+    },
   });
-
-  it("detects corrupted bytes at the content-addressed path", async () => {
-    const root = await temporaryRoot();
-    const store = new FileArtifactStore(root);
-    const artifact = createArtifact({ stable: true });
-    await store.put(artifact);
-    const path = join(root, "objects", "sha256", artifact.contentHash.slice("sha256:".length));
-    await writeFile(path, '{"stable":false}', "utf8");
-
-    await expect(store.get(artifact.contentHash)).rejects.toMatchObject({
-      code: "corrupt_artifact",
-    });
-  });
-
-  it("rejects non-canonical identities before resolving paths", async () => {
-    const store = new FileArtifactStore(await temporaryRoot());
-    await expect(store.get("../../outside")).rejects.toMatchObject({
-      code: "invalid_artifact_hash",
-    });
-  });
-
-  it("cleans temporary content when immutable publication fails", async () => {
-    const root = await temporaryRoot();
-    const artifact = createArtifact({ stable: true });
-    const objectDirectory = join(root, "objects", "sha256");
-    const finalPath = join(objectDirectory, artifact.contentHash.slice("sha256:".length));
-    await mkdir(finalPath, { recursive: true });
-
-    await expect(new FileArtifactStore(root).put(artifact)).rejects.toMatchObject({
-      code: "write_failed",
-    });
-    expect((await readdir(objectDirectory)).filter((entry) => entry.startsWith(".tmp-"))).toEqual(
-      [],
-    );
-  });
-
-  it("ignores stale temporary files left by an interrupted process", async () => {
-    const root = await temporaryRoot();
-    const objectDirectory = join(root, "objects", "sha256");
-    await mkdir(objectDirectory, { recursive: true });
-    await writeFile(join(objectDirectory, ".tmp-interrupted"), "partial", "utf8");
-    const artifact = createArtifact({ committed: true });
-    const store = new FileArtifactStore(root);
-
-    expect(await store.get(artifact.contentHash)).toBeUndefined();
-    await store.put(artifact);
-    expect(await store.get(artifact.contentHash)).toEqual(artifact);
-    expect(await readdir(objectDirectory)).toEqual([
-      ".tmp-interrupted",
-      artifact.contentHash.slice("sha256:".length),
-    ]);
-  });
+  const before = await stat(slot(r, p));
+  expect(before.ino).toBe(stagedInode);
+  await publish(r, p);
+  expect((await stat(slot(r, p))).ino).toBe(before.ino);
+  expect(await readFile(slot(r, p))).toEqual(p.bytes);
+  expect(await readdir(join(r, "staging"))).toEqual([]);
 });
-
-describe("filesystem run-manifest storage", () => {
-  it("atomically stores and verifies immutable manifests", async () => {
-    const root = await temporaryRoot();
-    const manifest = await manifestFixture(root);
-    const store = new FileRunManifestStore(root);
-    await store.put(manifest);
-    await store.put(manifest);
-
-    const loaded = await store.get(manifest.id);
-    expect(loaded).toEqual(manifest);
-    expect(Object.isFrozen(loaded)).toBe(true);
-    expect(Object.isFrozen(loaded?.stages)).toBe(true);
-    const entries = await readdir(join(root, "runs"));
-    expect(entries).toEqual([`${manifest.id}.json`]);
-    expect(entries.some((entry) => entry.startsWith(".tmp-"))).toBe(false);
+it("rejects malformed incoming bytes before creating state or deleting foreign temps", async () => {
+  const r = await root(),
+    p = candidate();
+  await expect(
+    publish(r, { ...p, bytes: Buffer.from(HEADER + '{"x":1,"x":2}') }),
+  ).rejects.toMatchObject({ code: "corrupt_artifact" });
+  expect(await readdir(r)).toEqual([]);
+  await expect(publish(r, { ...p, identity: "../outside" })).rejects.toMatchObject({
+    code: "invalid_argument",
   });
-
-  it("detects manifest tampering and rejects path traversal", async () => {
-    const root = await temporaryRoot();
-    const manifest = await manifestFixture(root);
-    const store = new FileRunManifestStore(root);
-    await store.put(manifest);
-    await writeFile(
-      join(root, "runs", `${manifest.id}.json`),
-      JSON.stringify({ ...manifest, completedAt: "2026-09-23T00:00:02.000Z" }),
-      "utf8",
-    );
-
-    await expect(store.get(manifest.id)).rejects.toMatchObject({ code: "corrupt_manifest" });
-    await expect(store.list()).rejects.toMatchObject({ code: "corrupt_manifest" });
-    await expect(store.get("../outside")).rejects.toMatchObject({ code: "invalid_run_id" });
+  await publish(r, p);
+  const foreign = join(r, "staging", "foreign.tmp");
+  await writeFile(foreign, "evidence");
+  await publish(r, p);
+  expect(await readFile(foreign, "utf8")).toBe("evidence");
+});
+it("refuses valid different occupied bytes under a private injected digest collision", async () => {
+  const r = await root(),
+    a = candidate(),
+    b = candidate('{"a":1,"z":2}');
+  await publish(r, a);
+  const before = await stat(slot(r, a));
+  if (!b.reference) throw new Error("Fixture reference missing.");
+  const collision = {
+    ...b,
+    identity: a.identity,
+    reference: { ...b.reference, hash: a.identity },
+  };
+  await expect(publish(r, collision, { hashDigest: () => a.identity })).rejects.toMatchObject({
+    code: "content_collision",
   });
-
-  it("lists verified manifests in deterministic newest-first order", async () => {
-    const root = await temporaryRoot();
-    const store = new FileRunManifestStore(root);
-    expect(await store.list()).toEqual([]);
-
-    const older = await manifestFixture(
-      root,
-      "2026-09-23T00:00:00.000Z",
-      "2026-09-23T00:00:01.000Z",
-    );
-    const newer = await manifestFixture(
-      root,
-      "2026-09-24T00:00:00.000Z",
-      "2026-09-24T00:00:01.000Z",
-    );
-    await store.put(older);
-    await store.put(newer);
-    await writeFile(join(root, "runs", ".tmp-orphan"), "ignored", "utf8");
-
-    const listed = await store.list();
-    expect(listed.map(({ id }) => id)).toEqual([newer.id, older.id]);
-    expect(Object.isFrozen(listed)).toBe(true);
-    expect(listed.every((manifest) => Object.isFrozen(manifest))).toBe(true);
+  expect(await readFile(slot(r, a))).toEqual(a.bytes);
+  expect((await stat(slot(r, a))).ino).toBe(before.ino);
+});
+it("refuses corrupt occupied bytes without repair and cleans only its own temp", async () => {
+  const r = await root(),
+    p = candidate();
+  await publish(r, p);
+  await writeFile(slot(r, p), HEADER + "broken");
+  await expect(publish(r, p)).rejects.toMatchObject({ code: "corrupt_artifact" });
+  expect(await readFile(slot(r, p), "utf8")).toBe(HEADER + "broken");
+  expect(await readdir(join(r, "staging"))).toEqual([]);
+});
+it("reopens bounded staged data and refuses tampering before commit", async () => {
+  const r = await root(),
+    p = candidate();
+  await expect(
+    publish(r, p, {
+      staged: async (file) => {
+        await writeFile(file, HEADER + "null");
+      },
+    }),
+  ).rejects.toMatchObject({ code: "corrupt_artifact" });
+  expect(await readdir(join(r, "objects", "abilitybench-artifact-v2", "sha256"))).toEqual([]);
+});
+it("refuses directory aliases and leaves the external directory untouched", async () => {
+  const r = await root(),
+    outside = await root();
+  await symlink(outside, join(r, "objects"), "junction");
+  await expect(publish(r, candidate())).rejects.toMatchObject({ code: "unsafe_path" });
+  expect(await readdir(outside)).toEqual([]);
+});
+it("does not release a foreign owner token or steal an abandoned lock", async () => {
+  const r = await root(),
+    p = candidate();
+  await expect(
+    publish(r, p, {
+      locked: async (lock) => {
+        await writeFile(join(lock, "owner.json"), "{}");
+      },
+    }),
+  ).rejects.toMatchObject({ code: "storage_busy" });
+  expect(await readFile(join(r, "writer-lock", "owner.json"), "utf8")).toBe("{}");
+  const start = performance.now();
+  await expect(publish(r, p)).rejects.toMatchObject({ code: "storage_busy" });
+  expect(performance.now() - start).toBeLessThan(5500);
+  expect(await readFile(join(r, "writer-lock", "owner.json"), "utf8")).toBe("{}");
+}, 7000);
+it("leaves a conservative blocked lock if owner-token creation fails", async () => {
+  const r = await root();
+  await mkdir(join(r, "writer-lock"));
+  await writeFile(join(r, "writer-lock", "owner.json"), "interrupted");
+  // A preexisting lock is never inspected as authority to steal it.
+  await expect(publish(r, candidate())).rejects.toMatchObject({ code: "storage_busy" });
+  expect(await readFile(join(r, "writer-lock", "owner.json"), "utf8")).toBe("interrupted");
+}, 7000);
+it("normalizes real lock cleanup failures without deleting foreign evidence", async () => {
+  const r = await root(),
+    p = candidate();
+  await expect(
+    publish(r, p, {
+      locked: async (lock) => {
+        await writeFile(join(lock, "foreign-evidence"), "preserve");
+      },
+    }),
+  ).rejects.toMatchObject({
+    code: "publication_failed",
+    causeCode: expect.stringMatching(/ENOTEMPTY|EEXIST/),
   });
+  expect(await readFile(join(r, "writer-lock", "foreign-evidence"), "utf8")).toBe("preserve");
+  expect(await readdir(join(r, "staging"))).toEqual([]);
+  expect(await readFile(slot(r, p))).toEqual(p.bytes);
 });

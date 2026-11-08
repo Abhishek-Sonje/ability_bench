@@ -460,7 +460,21 @@ export async function readOutput(
     operation,
     context,
   );
+  return verifyOutput(bytes, ref, operation, {
+    ...context,
+    file: resolve(root, "objects", "abilitybench-artifact-v2", "sha256", ref.hash.slice(7)),
+  });
+}
+// Shared incoming/occupied/read verification; the optional digest is private collision-fixture support.
+export function verifyOutput(
+  bytes: Buffer,
+  ref: OutputReference,
+  operation: string,
+  context: ErrorContext,
+  hashDigest = digest,
+): JsonValue {
   try {
+    reference(ref);
     if (!bytes.subarray(0, Buffer["byteLength"](HEADER)).equals(Buffer.from(HEADER))) {
       const lines = bytes.toString("utf8", 0, 128).split("\n");
       if (
@@ -480,7 +494,7 @@ export async function readOutput(
     const payload = bytes.subarray(Buffer["byteLength"](HEADER));
     requireValue(
       payload.length === ref["byteLength"] &&
-        digest("abilitybench/artifact/v2", bytes) === ref["hash"],
+        hashDigest("abilitybench/artifact/v2", bytes) === ref["hash"],
     );
     return parseOrdered(payload);
   } catch (error) {
@@ -492,7 +506,7 @@ export async function readOutput(
       operation,
       {
         ...context,
-        file: resolve(root, "objects", "abilitybench-artifact-v2", "sha256", ref.hash.slice(7)),
+        ...(context.file ? { file: context.file } : {}),
         ...(error instanceof AbilityBenchError ? error.context : {}),
       },
     );

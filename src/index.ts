@@ -1,5 +1,12 @@
 export type { AbilityBenchErrorCode, ErrorContext } from "./errors.js";
 export { AbilityBenchError } from "./errors.js";
+export type {
+  ExecutionPreview,
+  ExecutionResult,
+  PreparedExecution,
+  PrepareOptions,
+} from "./execution.js";
+export { prepare } from "./execution.js";
 export type { History, RunInspection } from "./history.js";
 export { openHistory } from "./history.js";
 export type {

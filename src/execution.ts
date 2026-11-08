@@ -1,383 +1,270 @@
-import type { ArtifactStore } from "./artifact-store.js";
-import { computeStageFingerprint, type FingerprintComponentHashes } from "./fingerprint.js";
-import type { DecisionReason, WorkflowPlan } from "./planning.js";
-import { canonicalizeJson, createArtifact, decodeArtifact } from "./serialization.js";
-import type { BuiltWorkflow, JsonObject, JsonValue, StageDefinition } from "./types.js";
-
-export type StageExecutionStatus =
-  | "pending"
-  | "reused"
-  | "succeeded"
-  | "failed"
-  | "skipped_dependency_failed"
-  | "skipped_run_stopped";
-
-export interface SerializedExecutionError {
-  readonly name: string;
-  readonly message: string;
+import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
+import { isPromise } from "node:util/types";
+import { AbilityBenchError } from "./errors.js";
+import { type PublicationSchedule, publish } from "./filesystem-store.js";
+import { type CapturedStage, observe } from "./influences.js";
+import {
+  digest,
+  HEADER,
+  OUTPUT_LIMIT,
+  type RecordedRun,
+  type RecordedStage,
+} from "./recorded-data.js";
+import { copyValue, orderedJson } from "./recorded-values.js";
+import { finalizeRecord } from "./run-manifest.js";
+import { type Workflow, workflowDeclarations } from "./typed-workflow.js";
+import type { JsonValue } from "./types.js";
+export interface PrepareOptions {
+  readonly baseline: null;
+  readonly historyDirectory?: string;
+  readonly failureMode?: "fail-fast" | "continue-independent";
 }
-
-export interface ExecutedStageRecord {
-  readonly stageId: string;
-  readonly plannedDecision: "reuse" | "execute";
-  readonly finalDecision: "reuse" | "execute";
-  readonly decisionReason: DecisionReason;
-  readonly decisionDetails: JsonObject;
-  readonly executionStatus: StageExecutionStatus;
-  readonly evaluationStatus: "not_run";
-  readonly fingerprint: string | null;
-  readonly componentHashes: FingerprintComponentHashes | null;
-  readonly outputArtifactHash: string | null;
-  readonly error: SerializedExecutionError | null;
+export interface ExecutionResult extends RecordedRun {
+  runId: string;
 }
-
-export interface WorkflowExecutionResult {
-  readonly workflowId: string;
-  readonly baselineRunId: string | null;
-  readonly baselineManifestHash: string | null;
-  readonly executionStatus: "completed" | "failed";
-  readonly evaluationStatus: "not_run";
-  readonly stages: readonly ExecutedStageRecord[];
+export interface ExecutionPreview {
+  workflowId: string;
+  baseline: null;
+  stages: { stageId: string; decision: string; reason: string; details: JsonValue }[];
 }
-
-export interface ExecuteWorkflowRequest {
-  readonly workflow: BuiltWorkflow;
-  readonly plan: WorkflowPlan;
-  readonly inputs: JsonObject;
-  readonly environment: Readonly<Record<string, string | undefined>>;
-  readonly artifacts: ArtifactStore;
+export interface PreparedExecution {
+  readonly preview: ExecutionPreview;
+  execute(): Promise<ExecutionResult>;
 }
-
-export async function executeWorkflow(
-  request: ExecuteWorkflowRequest,
-): Promise<WorkflowExecutionResult> {
-  assertPlanMatchesWorkflow(request.workflow, request.plan);
-  const stagesById = new Map(request.workflow.stages.map((stage) => [stage.id, stage]));
-  const plannedById = new Map(
-    request.plan.decisions.map((decision) => [decision.stageId, decision]),
-  );
-  const records = new Map<string, ExecutedStageRecord>();
-  const values = new Map<string, JsonValue>();
-  const artifactHashes = new Map<string, string>();
-  let failedStageId: string | null = null;
-
-  for (const stageId of request.workflow.topologicalOrder) {
-    const stage = required(stagesById.get(stageId), `Stage "${stageId}" is missing.`);
-    const planned = required(plannedById.get(stageId), `Stage "${stageId}" has no plan decision.`);
-
-    if (failedStageId !== null) {
-      const dependsOnFailure = isDescendant(stageId, failedStageId, stagesById);
-      records.set(
-        stageId,
-        skippedRecord(
-          stageId,
-          planned.decision,
-          planned.reason,
-          dependsOnFailure ? "skipped_dependency_failed" : "skipped_run_stopped",
-        ),
-      );
-      continue;
-    }
-
-    const executedDependencies = stage.dependencyIds.filter(
-      (dependencyId) => records.get(dependencyId)?.finalDecision === "execute",
+function frozen<T>(value: T): T {
+  if (value !== null && typeof value === "object") {
+    for (const item of Object.values(value)) frozen(item);
+    Object.freeze(value);
+  }
+  return value;
+}
+function selection(stage: CapturedStage): RecordedStage["preview"] {
+  return {
+    decision: "execute",
+    reason: stage.reuse === false ? "reuse_not_enabled" : "fresh",
+    details: {},
+  };
+}
+export async function prepare(
+  workflow: Workflow,
+  options: PrepareOptions,
+): Promise<PreparedExecution> {
+  return prepareExecution(workflow, options);
+}
+// Private coordinator entry for deterministic real-filesystem fault schedules, never root-exported.
+export async function prepareExecution(
+  workflow: Workflow,
+  options: PrepareOptions,
+  schedule: PublicationSchedule = {},
+): Promise<PreparedExecution> {
+  if (!options || !Object.hasOwn(options, "baseline") || options.baseline !== null)
+    throw new AbilityBenchError(
+      "invalid_argument",
+      "This slice requires deliberate baseline:null.",
+      "prepare",
     );
-    let finalDecision = planned.decision;
-    let reason = planned.reason;
-    let details = planned.details;
-    if (executedDependencies.length > 0 && finalDecision === "reuse") {
-      finalDecision = "execute";
-      reason = "dependency_executed";
-      details = { dependencies: executedDependencies };
-    }
-
-    if (finalDecision === "reuse") {
+  if (
+    options.historyDirectory !== undefined &&
+    (typeof options.historyDirectory !== "string" || !options.historyDirectory.trim())
+  )
+    throw new AbilityBenchError("invalid_argument", "Invalid history directory.", "prepare");
+  if (
+    options.failureMode !== undefined &&
+    !["fail-fast", "continue-independent"].includes(options.failureMode)
+  )
+    throw new AbilityBenchError("invalid_argument", "Invalid failure mode.", "prepare");
+  const failureMode = options.failureMode ?? "fail-fast";
+  const history = resolve(options.historyDirectory ?? resolve(workflow.root, ".abilitybench"));
+  const workflowId = workflow.id,
+    root = workflow.root;
+  const graph = workflowDeclarations(workflow);
+  const byId = new Map(graph.stages.map((stage) => [stage.id, stage]));
+  const stages: CapturedStage[] = graph.order.map((id) => {
+    const item = byId.get(id);
+    if (!item) throw new Error("Normalized stage is missing.");
+    const { dependencies, ...rest } = item;
+    return {
+      ...rest,
+      bindings: Object.entries(dependencies)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([name, handle]) => ({ name, stageId: handle.id })),
+      env: Object.fromEntries(item.environment.map((name) => [name, process.env[name]])),
+    };
+  });
+  const diagnostics = new Map<string, AbilityBenchError>();
+  for (const item of stages)
+    if (item.reuse !== false)
       try {
-        const dependencyArtifacts = Object.fromEntries(
-          stage.dependencyIds.map((dependencyId) => [
-            dependencyId,
-            required(
-              artifactHashes.get(dependencyId),
-              `Dependency "${dependencyId}" has no artifact.`,
-            ),
-          ]),
+        await observe(item, root, history, new Map());
+      } catch (error) {
+        if (!(error instanceof AbilityBenchError)) throw error;
+        diagnostics.set(item.id, error);
+      }
+  const previews = stages.map((item) => ({
+    stageId: item.id,
+    ...selection(item),
+    details: diagnostics.has(item.id)
+      ? { error: { code: diagnostics.get(item.id)?.code ?? "influence_unavailable" } }
+      : {},
+  }));
+  const preview = frozen(
+    copyValue({ workflowId, baseline: null, stages: previews }) as unknown as ExecutionPreview,
+  );
+  let used = false;
+  return Object.freeze({
+    preview,
+    async execute(): Promise<ExecutionResult> {
+      if (used)
+        throw new AbilityBenchError(
+          "prepared_execution_used",
+          "Prepared execution is single-use.",
+          "execute",
         );
-        const current = await computeStageFingerprint({
-          workflowId: request.workflow.id,
-          workflowRoot: request.workflow.root,
-          stage,
-          runInputs: request.inputs,
-          environment: request.environment,
-          dependencyArtifacts,
-        });
-        if (current.fingerprint !== planned.fingerprint) {
-          finalDecision = "execute";
-          reason = "fingerprint_changed";
-          details = {
-            changedComponents: Object.keys(current.componentHashes)
-              .filter((name) => {
-                const component = name as keyof FingerprintComponentHashes;
-                return current.componentHashes[component] !== planned.componentHashes?.[component];
-              })
-              .sort(),
+      used = true;
+      const attemptId = randomUUID(),
+        startedAt = new Date().toISOString();
+      const values = new Map<string, JsonValue>(),
+        hashes = new Map<string, string>();
+      const records: RecordedStage[] = [];
+      let failed = false;
+      const failureDescendants = new Set<string>();
+      for (const item of stages) {
+        const prior = previews.find((p) => p.stageId === item.id);
+        const prediction = prior
+          ? { decision: prior.decision, reason: prior.reason, details: prior.details }
+          : selection(item);
+        const blocked = item.bindings.some((binding) => failureDescendants.has(binding.stageId));
+        const reason = blocked
+          ? "dependency_blocked"
+          : failed && failureMode === "fail-fast"
+            ? "run_stopped"
+            : null;
+        const record: RecordedStage = {
+          stageId: item.id,
+          dependencies: item.bindings,
+          policy: item.reuse === false ? "always-execute" : "reusable",
+          preview: prediction,
+          actual: selection(item),
+          status: "succeeded",
+          fingerprint: null,
+          components: null,
+          output: null,
+          error: null,
+        };
+        records.push(record);
+        if (reason) {
+          record.status = "skipped";
+          if (blocked) failureDescendants.add(item.id);
+          record.actual = { decision: "skip", reason, details: {} };
+          continue;
+        }
+        let callbackInvoked = false;
+        try {
+          if (item.reuse !== false) {
+            record.components = await observe(item, root, history, hashes);
+            record.fingerprint = digest(
+              "abilitybench/fingerprint/declared-influences-v2",
+              orderedJson({ workflowId, stageId: item.id, components: record.components }),
+            );
+          }
+          const dependencies = Object.fromEntries(
+            item.bindings.map((binding) => [binding.name, copyValue(values.get(binding.stageId))]),
+          );
+          callbackInvoked = true;
+          const returned = item.run({
+            inputs: copyValue(item.inputs) as typeof item.inputs,
+            dependencies,
+            env: { ...item.env },
+          });
+          // Synchronous callbacks are copied before yielding; asynchronous results are copied immediately on settlement.
+          const output = copyValue(isPromise(returned) ? await returned : returned);
+          const observedAt = new Date().toISOString();
+          const payload = orderedJson(output),
+            byteLength = Buffer.byteLength(payload);
+          if (byteLength > OUTPUT_LIMIT)
+            throw new AbilityBenchError(
+              "output_limit_exceeded",
+              "Serialized output exceeds byte limit.",
+              "output",
+              { limit: OUTPUT_LIMIT, actualBytes: byteLength },
+            );
+          if (item.reuse !== false) {
+            const after = await observe(item, root, history, hashes);
+            if (orderedJson(after) !== orderedJson(record.components))
+              throw new AbilityBenchError(
+                "influence_changed_during_execution",
+                "Declared influences changed during callback.",
+                "execute",
+              );
+          }
+          const bytes = Buffer.from(HEADER + payload),
+            hash = digest("abilitybench/artifact/v2", bytes);
+          const reference = {
+            artifactSchema: "abilitybench-artifact-v2",
+            codec: "ordered-json-v1",
+            hashScheme: "sha256-domain-v2",
+            hash,
+            byteLength,
+            observedAt,
+            origin: { attemptId, stageId: item.id },
+          };
+          await publish(history, { kind: "artifact", identity: hash, bytes, reference }, schedule);
+          record.output = reference;
+          values.set(item.id, output);
+          hashes.set(item.id, hash);
+        } catch (error) {
+          failed = true;
+          failureDescendants.add(item.id);
+          record.status = "failed";
+          record.actual.details = { callbackInvoked };
+          const coded =
+            error instanceof AbilityBenchError
+              ? error
+              : new AbilityBenchError("callback_failed", "Stage callback failed.", "callback");
+          const context = coded.context;
+          record.error = {
+            code: coded.code,
+            message: coded.message,
+            operation: coded.operation,
+            attemptId,
+            stageId: item.id,
+            ...(context.file ? { file: context.file } : {}),
+            ...(context.path !== undefined ? { path: context.path } : {}),
+            ...(context.limit !== undefined ? { limit: context.limit } : {}),
+            ...(context.actualBytes !== undefined ? { actualBytes: context.actualBytes } : {}),
+            ...(context.causeCode ? { causeCode: context.causeCode } : {}),
           };
         }
-      } catch (error: unknown) {
-        failedStageId = stageId;
-        records.set(
-          stageId,
-          Object.freeze({
-            stageId,
-            plannedDecision: planned.decision,
-            finalDecision: "execute",
-            decisionReason: reason,
-            decisionDetails: details,
-            executionStatus: "failed",
-            evaluationStatus: "not_run",
-            fingerprint: null,
-            componentHashes: null,
-            outputArtifactHash: null,
-            error: serializeError(error),
-          }),
+      }
+      let runId: string | undefined;
+      try {
+        const finalized = finalizeRecord(attemptId, workflowId, startedAt, failureMode, records);
+        runId = finalized.record.id;
+        await publish(
+          history,
+          { kind: "record", identity: runId, bytes: finalized.bytes },
+          schedule,
         );
-        continue;
-      }
-    }
-
-    if (finalDecision === "reuse") {
-      const hash = planned.baselineArtifactHash;
-      if (hash !== null) {
-        try {
-          const artifact = await request.artifacts.get(hash);
-          if (artifact !== undefined) {
-            const value = decodeArtifact(artifact);
-            values.set(stageId, value);
-            artifactHashes.set(stageId, hash);
-            records.set(
-              stageId,
-              Object.freeze({
-                stageId,
-                plannedDecision: planned.decision,
-                finalDecision: "reuse",
-                decisionReason: reason,
-                decisionDetails: details,
-                executionStatus: "reused",
-                evaluationStatus: "not_run",
-                fingerprint: planned.fingerprint,
-                componentHashes: planned.componentHashes,
-                outputArtifactHash: hash,
-                error: null,
-              }),
-            );
-            continue;
-          }
-        } catch {
-          // Integrity failures conservatively fall through to execution.
-        }
-      }
-      finalDecision = "execute";
-      reason = "baseline_artifact_unavailable";
-      details = {};
-    }
-
-    try {
-      const dependencyArtifacts = Object.fromEntries(
-        stage.dependencyIds.map((dependencyId) => [
-          dependencyId,
-          required(
-            artifactHashes.get(dependencyId),
-            `Dependency "${dependencyId}" has no artifact.`,
-          ),
-        ]),
-      );
-      const fingerprint = await computeStageFingerprint({
-        workflowId: request.workflow.id,
-        workflowRoot: request.workflow.root,
-        stage,
-        runInputs: request.inputs,
-        environment: request.environment,
-        dependencyArtifacts,
-      });
-      const result = await stage.run({
-        dependencies: Object.freeze(
-          Object.fromEntries(
-            stage.dependencyIds.map((dependencyId) => [
-              dependencyId,
-              cloneJson(
-                required(values.get(dependencyId), `Dependency "${dependencyId}" has no value.`),
-              ),
-            ]),
-          ),
-        ),
-        inputs: Object.freeze(projectInputs(request.inputs, stage)),
-        env: Object.freeze(
-          Object.fromEntries(
-            stage.environmentNames.map((name) => [name, request.environment[name]]),
-          ),
-        ),
-      });
-      const afterRun = await computeStageFingerprint({
-        workflowId: request.workflow.id,
-        workflowRoot: request.workflow.root,
-        stage,
-        runInputs: request.inputs,
-        environment: request.environment,
-        dependencyArtifacts,
-      });
-      if (afterRun.fingerprint !== fingerprint.fingerprint) {
-        throw new Error(
-          `Declared inputs for stage "${stageId}" changed during execution; its output cannot be safely recorded.`,
+        return { ...(copyValue(finalized.record) as unknown as RecordedRun), runId };
+      } catch (error) {
+        const coded = error instanceof AbilityBenchError ? error : undefined;
+        throw new AbilityBenchError(
+          "finalization_failed",
+          "Finalization did not establish acknowledged saved history. Publication may be uncertain; inspect the allocated identity when available.",
+          "finalize",
+          {
+            attemptId,
+            ...(runId || coded?.runId ? { runId: runId ?? (coded?.runId as string) } : {}),
+            causeCode: coded?.causeCode ?? coded?.code ?? "UNKNOWN",
+            reason: coded?.code ?? "UNKNOWN",
+            status: runId ? "uncertain" : "not_published",
+            ...(coded?.file ? { file: coded.file } : {}),
+            ...(coded?.limit !== undefined ? { limit: coded.limit } : {}),
+            ...(coded?.actualBytes !== undefined ? { actualBytes: coded.actualBytes } : {}),
+          },
         );
       }
-      const artifact = createArtifact(result);
-      await request.artifacts.put(artifact);
-      values.set(stageId, decodeArtifact(artifact));
-      artifactHashes.set(stageId, artifact.contentHash);
-      records.set(
-        stageId,
-        Object.freeze({
-          stageId,
-          plannedDecision: planned.decision,
-          finalDecision,
-          decisionReason: reason,
-          decisionDetails: details,
-          executionStatus: "succeeded",
-          evaluationStatus: "not_run",
-          fingerprint: fingerprint.fingerprint,
-          componentHashes: fingerprint.componentHashes,
-          outputArtifactHash: artifact.contentHash,
-          error: null,
-        }),
-      );
-    } catch (error: unknown) {
-      failedStageId = stageId;
-      records.set(
-        stageId,
-        Object.freeze({
-          stageId,
-          plannedDecision: planned.decision,
-          finalDecision: "execute",
-          decisionReason: reason,
-          decisionDetails: details,
-          executionStatus: "failed",
-          evaluationStatus: "not_run",
-          fingerprint: null,
-          componentHashes: null,
-          outputArtifactHash: null,
-          error: serializeError(error),
-        }),
-      );
-    }
-  }
-
-  return Object.freeze({
-    workflowId: request.workflow.id,
-    baselineRunId: request.plan.baselineRunId,
-    baselineManifestHash: request.plan.baselineManifestHash,
-    executionStatus: failedStageId === null ? "completed" : "failed",
-    evaluationStatus: "not_run",
-    stages: Object.freeze(
-      request.workflow.topologicalOrder.map((stageId) =>
-        required(records.get(stageId), `Stage "${stageId}" has no execution record.`),
-      ),
-    ),
+    },
   });
-}
-
-function projectInputs(inputs: JsonObject, stage: StageDefinition): JsonObject {
-  const projected: JsonObject = {};
-  for (const pointer of stage.inputPointers) {
-    const selected = resolvePointer(inputs, pointer);
-    if (selected.found) projected[pointer] = cloneJson(selected.value);
-  }
-  return projected;
-}
-
-function cloneJson(value: JsonValue): JsonValue {
-  return JSON.parse(canonicalizeJson(value)) as JsonValue;
-}
-
-function resolvePointer(
-  root: JsonValue,
-  pointer: string,
-): { found: true; value: JsonValue } | { found: false } {
-  if (pointer === "") return { found: true, value: root };
-  let current = root;
-  for (const part of pointer.slice(1).split("/")) {
-    const token = part.replaceAll("~1", "/").replaceAll("~0", "~");
-    if (Array.isArray(current)) {
-      if (!/^(0|[1-9][0-9]*)$/.test(token)) return { found: false };
-      const next = current[Number(token)];
-      if (next === undefined) return { found: false };
-      current = next;
-    } else if (current !== null && typeof current === "object") {
-      const next = current[token];
-      if (next === undefined) return { found: false };
-      current = next;
-    } else return { found: false };
-  }
-  return { found: true, value: current };
-}
-
-function isDescendant(
-  candidateId: string,
-  ancestorId: string,
-  stages: ReadonlyMap<string, StageDefinition>,
-): boolean {
-  const pending = [...(stages.get(candidateId)?.dependencyIds ?? [])];
-  const visited = new Set<string>();
-  while (pending.length > 0) {
-    const current = pending.pop();
-    if (current === undefined) continue;
-    if (current === ancestorId) return true;
-    if (visited.has(current)) continue;
-    visited.add(current);
-    pending.push(...(stages.get(current)?.dependencyIds ?? []));
-  }
-  return false;
-}
-
-function skippedRecord(
-  stageId: string,
-  plannedDecision: "reuse" | "execute",
-  reason: DecisionReason,
-  status: "skipped_dependency_failed" | "skipped_run_stopped",
-): ExecutedStageRecord {
-  return Object.freeze({
-    stageId,
-    plannedDecision,
-    finalDecision: "execute",
-    decisionReason: reason,
-    decisionDetails: {},
-    executionStatus: status,
-    evaluationStatus: "not_run",
-    fingerprint: null,
-    componentHashes: null,
-    outputArtifactHash: null,
-    error: null,
-  });
-}
-
-function serializeError(error: unknown): SerializedExecutionError {
-  return error instanceof Error
-    ? Object.freeze({ name: error.name, message: error.message })
-    : Object.freeze({ name: "UnknownError", message: String(error) });
-}
-
-function assertPlanMatchesWorkflow(workflow: BuiltWorkflow, plan: WorkflowPlan): void {
-  if (workflow.id !== plan.workflowId) {
-    throw new TypeError(`Plan workflow "${plan.workflowId}" does not match "${workflow.id}".`);
-  }
-  const plannedIds = plan.decisions.map(({ stageId }) => stageId);
-  if (
-    plannedIds.length !== workflow.topologicalOrder.length ||
-    plannedIds.some((stageId, index) => stageId !== workflow.topologicalOrder[index])
-  ) {
-    throw new TypeError("Plan stages do not match the workflow's topological order.");
-  }
-}
-
-function required<Value>(value: Value | undefined, message: string): Value {
-  if (value === undefined) throw new Error(message);
-  return value;
 }
