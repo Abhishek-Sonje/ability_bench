@@ -1,12 +1,13 @@
 // biome-ignore-all lint/complexity/useLiteralKeys: Malformed schema fixtures use index signatures.
 import { createHash } from "node:crypto";
-import { rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { openHistory } from "../src/index.js";
+import { createWorkflow, openHistory, prepare } from "../src/index.js";
 
 import { fixture } from "./fixtures/history-fixture.js";
+import { copyPhase0History, phase0Id } from "./fixtures/phase0-fixture.js";
 
 const time = "2026-11-08T00:00:00.000Z";
 const header = "abilitybench-artifact-v2\nordered-json-v1\nsha256-domain-v2\n";
@@ -210,8 +211,16 @@ it("accepts exact 2 MiB record and refuses one byte over", async () => {
     2 * 1024 * 1024 - size,
   );
   const id = await f.save();
+  const workflow = createWorkflow({ id: "example", root: f.root, stages: [] });
+  const options = { historyDirectory: f.root, baseline: "latest" } as const;
+  await rm(join(f.root, "runs", `${firstId}.json`));
+  expect((await prepare(workflow, options)).preview.baseline?.runId).toBe(id);
   expect((await openHistory(f.root).run(id)).id).toBe(id);
   await (await import("node:fs/promises")).appendFile(join(f.root, "runs", `${id}.json`), " ");
+  await expect(prepare(workflow, options)).rejects.toMatchObject({
+    code: "read_limit_exceeded",
+    limit: 2 * 1024 * 1024,
+  });
   await expect(openHistory(f.root).run(id)).rejects.toMatchObject({
     code: "read_limit_exceeded",
     limit: 2 * 1024 * 1024,
@@ -439,13 +448,17 @@ it("sorts recorded timestamps and IDs, validates limits and scans before filteri
     { code: "corrupt_record" },
   );
 });
-it("accepts 1000 records, refuses 1001 and retains direct access", async () => {
+it("listing and latest accept 1000 mixed records, refuse 1001 and retain direct access", async () => {
   const f = await fixture();
-  const ids: string[] = [];
-  for (let i = 0; i < 1000; i++) {
+  await copyPhase0History(f.root);
+  const selected = await f.save();
+  for (let i = 0; i < 998; i++) {
     f.body["workflowId"] = `workflow-${i}`;
-    ids.push(await f.save());
+    await f.save();
   }
+  const workflow = createWorkflow({ id: "example", root: f.root, stages: [] });
+  const options = { historyDirectory: f.root, baseline: "latest" } as const;
+  expect((await prepare(workflow, options)).preview.baseline?.runId).toBe(selected);
   expect(await openHistory(f.root).runs()).toHaveLength(20);
   expect(await openHistory(f.root).runs({ limit: 1000 })).toHaveLength(1000);
   f.body["workflowId"] = "workflow-extra";
@@ -454,6 +467,13 @@ it("accepts 1000 records, refuses 1001 and retains direct access", async () => {
     code: "read_limit_exceeded",
     limit: 1000,
   });
+  await expect(prepare(workflow, options)).rejects.toMatchObject({
+    code: "read_limit_exceeded",
+    operation: "prepare",
+    limit: 1000,
+  });
+  const exact = await prepare(workflow, { ...options, baseline: { runId: selected } });
+  expect(exact.preview.baseline?.runId).toBe(selected);
   expect((await openHistory(f.root).run(id)).id).toBe(id);
   expect(await openHistory(f.root).output(id, "source")).toEqual({ z: [2, 1], a: null });
 }, 30000);
@@ -541,5 +561,68 @@ it("refuses invalid run filenames and unknown scanned formats", async () => {
   await writeFile(join(f.root, "runs", `${id}.json`), '{"schemaVersion":"abilitybench-run-v9"}');
   await expect(openHistory(f.root).runs()).rejects.toMatchObject({
     code: "unsupported_history_format",
+  });
+});
+
+it("orders latest by finalized time then descending ID, excluding valid legacy and other workflows", async () => {
+  const f = await fixture();
+  await copyPhase0History(f.root);
+  const workflow = createWorkflow({ id: "example", root: f.root, stages: [] });
+  const options = { historyDirectory: f.root, baseline: "latest" } as const;
+  await expect(
+    prepare(workflow, { ...options, baseline: { runId: phase0Id } }),
+  ).rejects.toMatchObject({
+    code: "baseline_incompatible",
+  });
+  await expect(prepare(workflow, options)).rejects.toMatchObject({
+    code: "baseline_not_found",
+    message: expect.stringContaining("baseline: null"),
+  });
+  f.body["startedAt"] = "2026-09-01T00:00:00.000Z";
+  const older = await f.save();
+  f.body["finalizedAt"] = "2026-11-09T00:00:00.000Z";
+  const a = await f.save();
+  f.body["startedAt"] = "2026-09-02T00:00:00.000Z";
+  const b = await f.save();
+  const [winner, loser] = [a, b].sort().reverse();
+  for (const id of [older, loser])
+    await utimes(
+      join(f.root, "runs", `${id}.json`),
+      new Date("2027-01-01"),
+      new Date("2027-01-01"),
+    );
+  f.body["workflowId"] = "other";
+  f.body["finalizedAt"] = "2026-11-10T00:00:00.000Z";
+  await f.save();
+  await rm(f.artifact);
+  expect((await prepare(workflow, options)).preview.baseline?.runId).toBe(winner);
+});
+
+it("latest rejects damaged history even when a compatible candidate exists", async () => {
+  const f = await fixture();
+  const candidate = await f.save();
+  await copyPhase0History(f.root);
+  const legacyPath = join(f.root, "runs", `${phase0Id}.json`);
+  const workflow = createWorkflow({ id: "example", root: f.root, stages: [] });
+  const options = { historyDirectory: f.root, baseline: "latest" } as const;
+  const legacy = await readFile(legacyPath, "utf8");
+  expect((await prepare(workflow, options)).preview.baseline?.runId).toBe(candidate);
+  for (const [bytes, code] of [
+    [legacy.replace('"workflowId":"example"', '"workflowId":"different"'), "corrupt_record"],
+    [JSON.stringify({ schemaVersion: "unknown-version" }, null, 2), "unsupported_history_format"],
+    [" ".repeat(2 * 1024 * 1024 + 1), "read_limit_exceeded"],
+  ] as const) {
+    await writeFile(legacyPath, bytes);
+    await expect(prepare(workflow, options)).rejects.toMatchObject({
+      code,
+      operation: "prepare",
+      runId: phase0Id,
+    });
+  }
+  await rm(legacyPath);
+  await mkdir(legacyPath);
+  await expect(prepare(workflow, options)).rejects.toMatchObject({
+    code: expect.stringMatching(/^(unsafe_path|record_unreadable)$/),
+    runId: phase0Id,
   });
 });

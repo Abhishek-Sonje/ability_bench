@@ -1,5 +1,5 @@
 import { AbilityBenchError } from "./errors.js";
-import { validId } from "./recorded-data.js";
+import { type RecordedRun, validId } from "./recorded-data.js";
 import { copyValue } from "./recorded-values.js";
 import type { JsonObject, JsonValue } from "./types.js";
 import { defineWorkflow } from "./workflow.js";
@@ -85,14 +85,45 @@ export function stage<
   declarations.set(handle, options as unknown as StageMetadata);
   return handle;
 }
+export type RefreshOptions =
+  | { readonly scope?: "selected" | "descendants"; readonly stages: readonly StageHandle[] }
+  | { readonly scope: "all"; readonly stages?: never };
+
+export function normalizeRefresh(
+  refresh: RefreshOptions | undefined,
+  handles: readonly StageHandle[],
+): RecordedRun["refresh"] {
+  if (refresh === undefined) return { scope: "selected", stageIds: [] };
+  if (plainObject(refresh)) {
+    const { scope = "selected", stages } = refresh;
+    if (scope === "all" && !Object.hasOwn(refresh, "stages") && stages === undefined)
+      return { scope, stageIds: [] };
+    if ((scope === "selected" || scope === "descendants") && Array.isArray(stages)) {
+      const selected = [...Array.prototype.values.call(stages)];
+      if (selected.every((handle) => handles.includes(handle)))
+        return { scope, stageIds: [...new Set(selected.map((handle) => handle.id))].sort() };
+    }
+  }
+  throw new AbilityBenchError(
+    "invalid_argument",
+    "Refresh requires workflow stage handles with selected or descendants scope, or all without a stage list.",
+    "prepare",
+  );
+}
+
 export function workflowDeclarations(workflow: Workflow): {
   stages: StageMetadata[];
   order: readonly string[];
+  handles: readonly StageHandle[];
 } {
   const handles = workflows.get(workflow);
   if (!handles) invalid("Workflow was not assembled by createWorkflow.");
   const stages = normalizeDeclarations(handles);
-  return { stages, order: validateGraph(workflow.id, workflow.root, stages).topologicalOrder };
+  return {
+    stages,
+    handles,
+    order: validateGraph(workflow.id, workflow.root, stages).topologicalOrder,
+  };
 }
 function normalizeDeclarations(handles: readonly StageHandle[]): StageMetadata[] {
   return handles.map((handle) => {

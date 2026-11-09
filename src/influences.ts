@@ -9,6 +9,7 @@ import type { JsonObject, JsonValue } from "./types.js";
 export interface CapturedStage extends Omit<StageMetadata, "dependencies"> {
   bindings: { name: string; stageId: string }[];
   env: Record<string, string | undefined>;
+  refreshScope: RecordedRun["refresh"]["scope"] | null;
 }
 interface EligibilityObservation {
   unresolved?: string[];
@@ -42,6 +43,7 @@ export function eligibility(
   const previous = baseline?.stages.find((s) => s.stageId === stage.id);
   const causes: string[] = [];
   if (stage.reuse === false) causes.push("reuse_not_enabled");
+  if (stage.refreshScope) causes.push("refresh");
   if (!baseline) causes.push("fresh");
   else if (!previous) causes.push("baseline_stage_missing");
   else {
@@ -81,6 +83,7 @@ export function eligibility(
     reason,
     details: {
       causes: causes.length ? causes : ["reused"],
+      ...(stage.refreshScope ? { refreshScope: stage.refreshScope } : {}),
       ...(changedComponents.length
         ? {
             changedComponents: changedComponents.map((name) => ({

@@ -37,12 +37,79 @@ export async function listRuns(root: string, options: RunsOptions = {}): Promise
       "Expected a positive limit up to 1000 and a valid workflow ID.",
       "runs",
     );
+  const results: RunSummary[] = [];
+  for await (const record of scanRuns(root, "runs")) {
+    const { id } = record;
+    if (options.workflowId !== undefined && record.workflowId !== options.workflowId) continue;
+    if (record.schemaVersion === "phase0-run-v1") {
+      results.push({
+        id,
+        workflowId: record.workflowId,
+        finalizedAt: record.completedAt,
+        status: record.executionStatus,
+        baseline:
+          record.baselineRunId !== null && record.baselineManifestHash !== null
+            ? {
+                runId: record.baselineRunId,
+                recordHash: record.baselineManifestHash,
+                schemaVersion: record.schemaVersion,
+              }
+            : null,
+        schemaVersion: record.schemaVersion,
+        codec: "canonical-json-v1",
+        hashScheme: "sha256-domain-v1",
+        fingerprintContract: "phase0-v1",
+      });
+      continue;
+    }
+    const {
+      workflowId,
+      finalizedAt,
+      status,
+      baseline,
+      schemaVersion,
+      codec,
+      hashScheme,
+      fingerprintContract,
+    } = record;
+    results.push({
+      id,
+      workflowId,
+      finalizedAt,
+      status,
+      baseline,
+      schemaVersion,
+      codec,
+      hashScheme,
+      fingerprintContract,
+    });
+  }
+  return results.sort(newestFirst).slice(0, limit);
+}
+
+export function newestFirst(
+  a: Pick<RunSummary, "finalizedAt" | "id">,
+  b: Pick<RunSummary, "finalizedAt" | "id">,
+): number {
+  if (a.finalizedAt !== b.finalizedAt) return a.finalizedAt > b.finalizedAt ? -1 : 1;
+  return a.id === b.id ? 0 : a.id > b.id ? -1 : 1;
+}
+
+export async function* scanRuns(root: string, operation: string) {
   let physical: string;
   try {
     physical = await realpath(root);
     if (!(await stat(physical)).isDirectory()) throw new Error();
-  } catch {
-    throw new AbilityBenchError("history_not_found", "History directory is unavailable.", "runs");
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    throw new AbilityBenchError(
+      code === undefined || code === "ENOENT" || code === "ENOTDIR"
+        ? "history_not_found"
+        : "record_unreadable",
+      "History directory is unavailable.",
+      operation,
+      { file: root },
+    );
   }
   const directory = resolve(root, "runs");
   let entries: Awaited<ReturnType<typeof opendir>>;
@@ -50,14 +117,13 @@ export async function listRuns(root: string, options: RunsOptions = {}): Promise
     const target = await realpath(directory);
     const path = relative(physical, target);
     if (isAbsolute(path) || path === ".." || path.startsWith(`..${sep}`))
-      throw new AbilityBenchError("unsafe_path", "Run directory escapes history.", "runs");
+      throw new AbilityBenchError("unsafe_path", "Run directory escapes history.", operation);
     entries = await opendir(directory);
   } catch (error) {
     if (error instanceof AbilityBenchError) throw error;
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw new AbilityBenchError("record_unreadable", "Cannot enumerate run records.", "runs");
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw new AbilityBenchError("record_unreadable", "Cannot enumerate run records.", operation);
   }
-  const results: RunSummary[] = [];
   let scanned = 0;
   try {
     for await (const entry of entries) {
@@ -73,73 +139,18 @@ export async function listRuns(root: string, options: RunsOptions = {}): Promise
         throw new AbilityBenchError(
           "read_limit_exceeded",
           "History exceeds the 1000-record scan limit.",
-          "runs",
+          operation,
           { limit: 1000 },
         );
       const id = entry.name.endsWith(".json") ? entry.name.slice(0, -5) : "";
       if (!RUN_ID.test(id))
-        throw new AbilityBenchError("corrupt_record", "Invalid committed run entry.", "runs", {
+        throw new AbilityBenchError("corrupt_record", "Invalid committed run entry.", operation, {
           file: resolve(directory, entry.name),
         });
-      const record = await readHistoryRun(root, id, "runs", { runId: id });
-      if (options.workflowId !== undefined && record.workflowId !== options.workflowId) continue;
-      if (record.schemaVersion === "phase0-run-v1") {
-        results.push({
-          id,
-          workflowId: record.workflowId,
-          finalizedAt: record.completedAt,
-          status: record.executionStatus,
-          baseline:
-            record.baselineRunId !== null && record.baselineManifestHash !== null
-              ? {
-                  runId: record.baselineRunId,
-                  recordHash: record.baselineManifestHash,
-                  schemaVersion: record.schemaVersion,
-                }
-              : null,
-          schemaVersion: record.schemaVersion,
-          codec: "canonical-json-v1",
-          hashScheme: "sha256-domain-v1",
-          fingerprintContract: "phase0-v1",
-        });
-        continue;
-      }
-      const {
-        workflowId,
-        finalizedAt,
-        status,
-        baseline,
-        schemaVersion,
-        codec,
-        hashScheme,
-        fingerprintContract,
-      } = record;
-      results.push({
-        id,
-        workflowId,
-        finalizedAt,
-        status,
-        baseline,
-        schemaVersion,
-        codec,
-        hashScheme,
-        fingerprintContract,
-      });
+      yield await readHistoryRun(root, id, operation, { runId: id });
     }
   } catch (error) {
     if (error instanceof AbilityBenchError) throw error;
-    throw new AbilityBenchError("record_unreadable", "Cannot enumerate run records.", "runs");
+    throw new AbilityBenchError("record_unreadable", "Cannot enumerate run records.", operation);
   }
-  results.sort((a, b) =>
-    a.finalizedAt === b.finalizedAt
-      ? a.id < b.id
-        ? 1
-        : a.id > b.id
-          ? -1
-          : 0
-      : a.finalizedAt < b.finalizedAt
-        ? 1
-        : -1,
-  );
-  return results.slice(0, limit);
 }

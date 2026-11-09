@@ -6,6 +6,7 @@ import {
   createWorkflow,
   type JsonValue,
   openHistory,
+  type PrepareOptions,
   prepare,
   type ReuseOptions,
   stage,
@@ -232,7 +233,7 @@ it("retains a mutable-source observation but runs reached publication after reus
   );
   expect(await openHistory(f.history).output(fresh.runId, "source")).toBe("today");
 });
-it("rejects absent, wrong-workflow, corrupt, known incompatible and unknown baselines before callbacks", async () => {
+it("rejects absent, wrong-workflow, corrupt and unknown baselines before callbacks", async () => {
   const f = await fixture();
   let calls = 0;
   const source = stage({
@@ -257,7 +258,7 @@ it("rejects absent, wrong-workflow, corrupt, known incompatible and unknown base
   const path = join(f.history, "runs", `${missing}.json`);
   for (const [bytes, code] of [
     ["{", "corrupt_record"],
-    [JSON.stringify({ schemaVersion: "phase0-run-v1" }), "baseline_incompatible"],
+    [JSON.stringify({ schemaVersion: "phase0-run-v1" }), "corrupt_record"],
     [JSON.stringify({ schemaVersion: "future-format" }), "unsupported_history_format"],
   ]) {
     await writeFile(path, bytes ?? "");
@@ -267,7 +268,7 @@ it("rejects absent, wrong-workflow, corrupt, known incompatible and unknown base
   }
   expect(calls).toBe(1);
 });
-it("retains every applicable cause when influence and artifact changes both prevent reuse", async () => {
+it.each([false, true])("retains influence and artifact causes with refresh=%s", async (force) => {
   const f = await fixture();
   function graph(prompt: string) {
     return createWorkflow({
@@ -288,11 +289,15 @@ it("retains every applicable cause when influence and artifact changes both prev
       first.stages[0]?.output?.hash.slice(7) ?? "missing",
     ),
   );
-  const prepared = await prepare(graph("changed"), { baseline: { runId: first.runId } });
+  const prepared = await prepare(graph("changed"), {
+    baseline: { runId: first.runId },
+    ...(force ? { refresh: { scope: "all" as const } } : {}),
+  });
   expect(prepared.preview.stages[0]).toMatchObject({
-    reason: "influences_changed",
+    reason: force ? "refresh" : "influences_changed",
     details: {
-      causes: ["influences_changed", "reuse_unavailable"],
+      causes: [...(force ? ["refresh"] : []), "influences_changed", "reuse_unavailable"],
+      ...(force ? { refreshScope: "all" } : {}),
       artifact: { code: "artifact_not_found" },
     },
   });
@@ -455,9 +460,13 @@ it("keeps blocked/stopped precedence without discarding applicable policy or inf
 it("selects exactly one retained baseline and reuses its original observation without callbacks", async () => {
   const f = await fixture();
   let calls = 0;
+  let duringCapture = () => {};
   const source = stage({
     id: "source",
-    reuse: { revision: "v1" },
+    get reuse() {
+      duringCapture();
+      return { revision: "v1" };
+    },
     run: () => {
       calls++;
       return { z: [2, 1], a: null };
@@ -466,13 +475,16 @@ it("selects exactly one retained baseline and reuses its original observation wi
   const workflow = createWorkflow({ id: "reuse", root: f.root, stages: [source] });
   const first = await (await prepare(workflow, { baseline: null })).execute();
   const selected = { runId: first.runId };
+  duringCapture = () => {
+    selected.runId = `run_${"0".repeat(64)}`;
+  };
   const prepared = await prepare(workflow, { baseline: selected });
   expect(calls).toBe(1);
   expect(prepared.preview).toMatchObject({
     baseline: { runId: first.runId, status: "completed", schemaVersion: "abilitybench-run-v2" },
     stages: [{ decision: "reuse", reason: "reused" }],
   });
-  selected.runId = `run_${"0".repeat(64)}`;
+  selected.runId = first.runId;
   const second = await prepared.execute();
   expect(calls).toBe(1);
   expect(second.baseline?.runId).toBe(first.runId);
@@ -487,4 +499,189 @@ it("selects exactly one retained baseline and reuses its original observation wi
   if (inspected.schemaVersion !== "abilitybench-run-v2")
     throw new Error("Expected current history.");
   expect(inspected.stages[0]?.preview).toEqual(second.stages[0]?.preview);
+});
+it("freezes latest before a later finalized run appears", async () => {
+  const f = await fixture();
+  let value = 1;
+  const source = stage({ id: "source", reuse: { revision: "one" }, run: () => value });
+  const workflow = createWorkflow({ id: "latest", root: f.root, stages: [source] });
+  const first = await (await prepare(workflow, { baseline: null })).execute();
+  const prepared = await prepare(workflow, { baseline: "latest" });
+  value = 2;
+  await (await prepare(workflow, { baseline: null })).execute();
+  const result = await prepared.execute();
+  expect(prepared.preview.baseline).toMatchObject({
+    runId: first.runId,
+    status: "completed",
+    schemaVersion: "abilitybench-run-v2",
+  });
+  expect(result.baseline).toEqual(prepared.preview.baseline);
+  expect(result.stages[0]?.status).toBe("reused");
+  expect(await openHistory(f.history).output(result.runId, "source")).toBe(1);
+});
+it.each(["default", "selected", "descendants", "all", "changed"] as const)(
+  "refreshes the %s scope and propagates actual output identity outside it",
+  async (scope) => {
+    const f = await fixture();
+    const calls: string[] = [];
+    let value = 1;
+    const source = stage({
+      id: "source",
+      reuse: { revision: "one" },
+      run: () => {
+        calls.push("source");
+        return value;
+      },
+    });
+    const leaf = stage({
+      id: "leaf",
+      dependencies: { source },
+      reuse: { revision: "one" },
+      run: ({ dependencies }) => {
+        calls.push("leaf");
+        return dependencies.source;
+      },
+    });
+    const tail = stage({
+      id: "tail",
+      dependencies: { leaf },
+      reuse: { revision: "one" },
+      run: () => {
+        calls.push("tail");
+        return 3;
+      },
+    });
+    const independent = stage({
+      id: "independent",
+      reuse: { revision: "one" },
+      run: () => {
+        calls.push("independent");
+        return 4;
+      },
+    });
+    const workflow = createWorkflow({
+      id: "refresh",
+      root: f.root,
+      stages: [source, leaf, tail, independent],
+    });
+    const first = await (await prepare(workflow, { baseline: null })).execute();
+    const path = join(f.history, "runs", `${first.runId}.json`);
+    const original = await readFile(path);
+    calls.length = 0;
+    const selected = [source];
+    const refresh =
+      scope === "all"
+        ? ({ scope } as const)
+        : scope === "default" || scope === "changed"
+          ? { stages: selected }
+          : { scope, stages: selected };
+    const prepared = await prepare(workflow, { baseline: { runId: first.runId }, refresh });
+    selected.pop();
+    const reasons = [
+      "refresh",
+      scope === "descendants" || scope === "all" ? "refresh" : "reused",
+      scope === "descendants" || scope === "all" ? "refresh" : "reused",
+      scope === "all" ? "refresh" : "reused",
+    ];
+    expect(prepared.preview.stages.map((s) => s.reason)).toEqual(reasons);
+    if (scope === "default" || scope === "selected")
+      expect(prepared.preview.stages[1]?.decision).toBe("conditional");
+    expect(calls).toEqual([]);
+    if (scope === "changed") value = 5;
+    const result = await prepared.execute();
+    expect(calls).toEqual(
+      scope === "all"
+        ? ["source", "leaf", "tail", "independent"]
+        : scope === "descendants" || scope === "changed"
+          ? ["source", "leaf", "tail"]
+          : ["source"],
+    );
+    expect(result.refresh).toEqual({
+      scope: scope === "default" || scope === "changed" ? "selected" : scope,
+      stageIds: scope === "all" ? [] : ["source"],
+    });
+    expect(result.stages.map((s) => s.actual.reason)).toEqual(
+      scope === "changed"
+        ? ["refresh", "influences_changed", "influences_changed", "reused"]
+        : reasons,
+    );
+    expect(await openHistory(f.history).run(result.runId)).toMatchObject({
+      refresh: result.refresh,
+    });
+    expect(await readFile(path)).toEqual(original);
+  },
+);
+
+it("rejects malformed selections and contradictory or foreign refresh requests before callbacks", async () => {
+  const f = await fixture();
+  const source = stage({
+    id: "source",
+    run: () => {
+      throw new Error("Unexpected callback");
+    },
+  });
+  const foreign = stage({ id: "source", run: () => null });
+  const workflow = createWorkflow({ id: "refresh-options", root: f.root, stages: [source] });
+  const id = `run_${"0".repeat(64)}`;
+  for (const baseline of [
+    undefined,
+    "fresh",
+    {},
+    { runId: "bad" },
+    { runId: id, latest: true },
+    Object.assign(Object.create({ runId: id }), { unrelated: true }),
+  ]) {
+    await expect(prepare(workflow, { baseline } as PrepareOptions)).rejects.toMatchObject({
+      code: "invalid_argument",
+    });
+  }
+  const masked = [foreign];
+  masked[Symbol.iterator] = () => [source].values();
+  for (const refresh of [
+    null,
+    {},
+    { scope: "invalid", stages: [source] },
+    { scope: "all", stages: [] },
+    { stages: [foreign] },
+    { stages: masked },
+    { stages: [{ id: source.id }] },
+    { stages: Array(1) },
+    { scope: "descendants", stages: source },
+  ]) {
+    await expect(
+      prepare(workflow, { baseline: null, refresh } as PrepareOptions),
+    ).rejects.toMatchObject({
+      code: "invalid_argument",
+    });
+  }
+});
+
+it("latest ignores an in-flight attempt until its finalized record exists", async () => {
+  const f = await fixture();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const source = stage({
+    id: "source",
+    reuse: { revision: "one" },
+    run: async () => {
+      entered.resolve();
+      await release.promise;
+      return 1;
+    },
+  });
+  const workflow = createWorkflow({ id: "in-flight", root: f.root, stages: [source] });
+  const running = (await prepare(workflow, { baseline: null })).execute();
+  await entered.promise;
+  try {
+    await expect(prepare(workflow, { baseline: "latest" })).rejects.toMatchObject({
+      code: "baseline_not_found",
+    });
+  } finally {
+    release.resolve();
+    await running;
+  }
+  const completed = await running;
+  expect((await prepare(workflow, { baseline: "latest" })).preview.baseline?.runId).toBe(
+    completed.runId,
+  );
 });

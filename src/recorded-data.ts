@@ -62,7 +62,7 @@ export interface RecordedRun {
   status: "completed" | "failed";
   baseline: { runId: string; recordHash: string; schemaVersion: string; status: string } | null;
   failureMode: string;
-  refresh: { scope: string; stageIds: string[] };
+  refresh: { scope: "selected" | "descendants" | "all"; stageIds: string[] };
   stages: RecordedStage[];
 }
 const reasons =
@@ -398,17 +398,6 @@ function causeCode(error: unknown): string {
     ? String(error.code)
     : "UNKNOWN";
 }
-export function readRun(
-  root: string,
-  runId: string,
-  operation: string,
-  context: ErrorContext,
-): Promise<RecordedRun> {
-  return readRunRecord(root, runId, operation, context, (text, value) =>
-    verifyCurrentRun(text, value, runId),
-  );
-}
-
 export function readHistoryRun(
   root: string,
   runId: string,
@@ -423,8 +412,9 @@ export function readHistoryRun(
 }
 
 function verifyCurrentRun(text: string, value: JsonValue, runId: string): RecordedRun {
+  const record = validateRun(value, runId);
   requireValue(orderedJson(value) === text);
-  return validateRun(value, runId);
+  return record;
 }
 
 async function readRunRecord<T>(

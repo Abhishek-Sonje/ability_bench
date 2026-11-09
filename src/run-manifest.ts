@@ -14,6 +14,7 @@ export function finalizeRecord(
   failureMode: string,
   stages: RecordedStage[],
   baseline: RecordedRun["baseline"] = null,
+  refresh: RecordedRun["refresh"] = { scope: "selected", stageIds: [] },
 ): { record: RecordedRun; bytes: Buffer } {
   const versions = {
     schemaVersion: "abilitybench-run-v2",
@@ -30,7 +31,7 @@ export function finalizeRecord(
     status: stages.some((s) => s.status === "failed") ? "failed" : "completed",
     baseline,
     failureMode,
-    refresh: { scope: "selected", stageIds: [] },
+    refresh,
     stages,
   };
   const recordHash = digest("abilitybench/run/v2", orderedJson(body));

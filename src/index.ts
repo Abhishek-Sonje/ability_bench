@@ -14,6 +14,7 @@ export type { RunSummary, RunsOptions } from "./history-list.js";
 export type {
   DependencyBindings,
   DependencyOutputs,
+  RefreshOptions,
   ReuseOptions,
   StageHandle,
   StageOptions,

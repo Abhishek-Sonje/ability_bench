@@ -5,12 +5,11 @@ for local TypeScript workflows. The authoritative release contract is
 [specification #10](https://github.com/Abhishek-Sonje/ability_bench/issues/10).
 
 This checkout implements isolated supported sources (#11), selected ordered-history
-reads (#12), fresh typed execution (#13), and explicit retained-baseline reuse (#14).
+reads (#12), typed execution (#13–14), independent mixed-format history (#15–16),
+and frozen baseline selection and refresh (#17).
 It is an intermediate private development version, not a qualified 0.1.0 release.
 The root exports `stage`, `createWorkflow`, `prepare`, `openHistory`, `AbilityBenchError`
-and their associated types. Opt-in
-latest selection, refresh, repair, history listing/comparison, legacy-format
-reading and the four-command CLI belong to subsequent tickets.
+and their associated types.
 
 ```ts
 import { stage, createWorkflow, prepare, openHistory } from "abilitybench";
@@ -51,10 +50,15 @@ validators for domain configuration and provider responses.
 verified, compatible same-workflow run in the chosen history directory. Missing selection
 fails with `baseline_not_found`; a different workflow fails with
 `baseline_workflow_mismatch`; recognized old sorted history is `baseline_incompatible`.
-Unknown or corrupt formats fail verification. Preparation freezes this selection and
+`baseline: "latest"` validates every scanned record, then selects the compatible completed
+or failed run for this workflow with the greatest recorded finalization timestamp and
+descending run ID as the tiebreaker. Known Phase 0 records count toward the scan limit
+and are excluded from selection. Corrupt, unreadable, unknown or over-budget history
+fails preparation. Latest scans up to 1,000 records, with a 2 MiB bound per record.
+Exact selection bypasses the scan limit. When there is no compatible candidate, choose
+`baseline: null` to start fresh. Preparation freezes this selection and
 shows its identity, format and completed/failed status in preview and finalized history.
 It never searches older runs for individual outputs or imports ancestor records.
-`"latest"` and refresh controls remain later-ticket work.
 
 Omitting `reuse`, or specifying `false`, means always execute when reached, with no
 fingerprint or stability obligation; its output remains inspectable. A reuse object
@@ -77,7 +81,7 @@ Own known changes still predict execution. Preview remains separately recorded;
 actual decisions use actual outputs and new influence/artifact observations.
 Reasons retain applicable `causes`, named `changedComponents` with before/current
 digests, `changedBindings`, and watch/artifact error codes. Primary precedence is
-blocked/stopped, always-execute, fresh, missing/ineligible baseline, changed influences,
+blocked/stopped, always-execute, refresh, fresh, missing/ineligible baseline, changed influences,
 unavailable artifact, reused. Failure error codes remain separate.
 
 Propagation compares whole ordered outputs, including object/array order and fields
@@ -101,8 +105,12 @@ Declare every relevant prompt/model/setting as stage inputs and every dependency
 binding, environment name, implementation revision and exact watched source/helper/prompt
 file. Bookkeeping names/physical paths normalize without sorting nested user values.
 Disk checks do not detect every A→B→A change or prove an atomic external observation.
-To resample now, deliberately execute fresh in this slice. Future refresh controls
-invoke existing acquisition code; code reading an old snapshot still reads that snapshot.
+Use `refresh: { stages: [research] }` to resample selected stages. The default scope
+is `"selected"`. Use `scope: "descendants"` with a stage list to include its transitive
+descendants, or `refresh: { scope: "all" }` for the whole workflow. An all-scope request
+cannot include a stage list. Refresh runs reached callbacks and leaves prior records
+intact. Outside the scope, reuse depends on actual output equality and the other
+declared influences. A callback that reads an existing snapshot still reads that snapshot.
 
 History defaults to `<root>/.abilitybench`; `historyDirectory` can select an external
 directory. Default `failureMode: "fail-fast"` stops scheduling after failure;

@@ -89,25 +89,36 @@ it("captures caller inputs, graph, callback, options and named environment; isol
     else process.env["ABILITYBENCH_CAPTURE"] = previous;
   }
 });
-it.each(["fail-fast", "continue-independent"] as const)(
+it.each([undefined, "continue-independent"] as const)(
   "retains earlier successes with %s failure scheduling",
   async (failureMode) => {
     const f = await fixture();
     let failedCalls = 0,
       descendantCalls = 0,
       independentCalls = 0;
-    const seed = stage({ id: "seed", run: () => null });
+    let seedCalls = 0;
+    let fail = true;
+    const seed = stage({
+      id: "seed",
+      reuse: { revision: "one" },
+      run: () => {
+        seedCalls++;
+        return null;
+      },
+    });
     const bad = stage({
       id: "bad",
       dependencies: { seed },
       run: () => {
         failedCalls++;
-        throw new Error("provider credential must not leak");
+        if (fail) throw new Error("provider credential must not leak");
+        return 1;
       },
     });
     const blocked = stage({
       id: "blocked",
       dependencies: { bad },
+      reuse: { revision: "one" },
       run: () => {
         descendantCalls++;
         return 2;
@@ -120,16 +131,22 @@ it.each(["fail-fast", "continue-independent"] as const)(
         return 3;
       },
     });
+    const workflow = createWorkflow({
+      id: "failures",
+      root: f.root,
+      stages: [seed, bad, blocked, independent],
+    });
     const result = await (
-      await prepare(
-        createWorkflow({ id: "failures", root: f.root, stages: [seed, bad, blocked, independent] }),
-        { baseline: null, failureMode },
-      )
+      await prepare(workflow, {
+        baseline: null,
+        ...(failureMode ? { failureMode } : {}),
+        refresh: { scope: "all" },
+      })
     ).execute();
     expect(result.status).toBe("failed");
     expect(failedCalls).toBe(1);
     expect(descendantCalls).toBe(0);
-    expect(independentCalls).toBe(failureMode === "fail-fast" ? 0 : 1);
+    expect(independentCalls).toBe(failureMode === undefined ? 0 : 1);
     expect(result.stages[1]).toMatchObject({
       status: "failed",
       actual: { decision: "execute", details: { callbackInvoked: true } },
@@ -137,12 +154,33 @@ it.each(["fail-fast", "continue-independent"] as const)(
     });
     expect(result.stages[2]?.actual.reason).toBe("dependency_blocked");
     expect(result.stages[3]?.actual.reason).toBe(
-      failureMode === "fail-fast" ? "run_stopped" : "reuse_not_enabled",
+      failureMode === undefined ? "run_stopped" : "reuse_not_enabled",
     );
     expect(await openHistory(f.history).output(result.runId, "seed")).toBeNull();
     expect(JSON.stringify(await openHistory(f.history).run(result.runId))).not.toContain(
       "credential",
     );
+    expect(result.stages[1]?.actual.details).toMatchObject({
+      causes: ["reuse_not_enabled", "refresh", "fresh"],
+      refreshScope: "all",
+    });
+    expect(result.stages[2]?.actual.details).toMatchObject({
+      causes: ["dependency_blocked", "refresh", "fresh"],
+      refreshScope: "all",
+    });
+    fail = false;
+    const recovery = await prepare(workflow, { baseline: "latest" });
+    expect(recovery.preview.baseline).toMatchObject({
+      runId: result.runId,
+      status: "failed",
+      schemaVersion: "abilitybench-run-v2",
+    });
+    const recovered = await recovery.execute();
+    expect(recovered.status).toBe("completed");
+    expect(seedCalls).toBe(1);
+    expect(descendantCalls).toBe(1);
+    expect(recovered.stages[0]?.output).toEqual(result.stages[0]?.output);
+    expect(recovered.stages[2]?.actual.reason).toBe("baseline_output_absent");
   },
 );
 it("reports unavailable watches in preview and fails before callback without retry", async () => {
@@ -234,14 +272,13 @@ it("copies synchronous outputs before callback-scheduled mutation and preserves 
     other: { z: [2, 1], a: 0 },
   });
 });
-it("rejects omitted or deferred baseline selection and remains used after finalization rejects", async () => {
+it("rejects omitted and unavailable baseline selection and remains used after finalization rejects", async () => {
   const f = await fixture();
   const workflow = createWorkflow({ id: "once", root: f.root, stages: [] });
   // @ts-expect-error Deliberate JavaScript misuse.
   await expect(prepare(workflow, {})).rejects.toMatchObject({ code: "invalid_argument" });
-  // @ts-expect-error Retained selection is outside this slice.
   await expect(prepare(workflow, { baseline: "latest" })).rejects.toMatchObject({
-    code: "invalid_argument",
+    code: "baseline_not_found",
   });
   await writeFile(f.history, "blocked by real file");
   const p = await prepare(workflow, { baseline: null });

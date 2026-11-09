@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { isPromise } from "node:util/types";
 import { AbilityBenchError } from "./errors.js";
 import { type PublicationSchedule, publish } from "./filesystem-store.js";
+import { newestFirst, scanRuns } from "./history-list.js";
 import { type CapturedStage, eligibility, observe } from "./influences.js";
 import {
   digest,
@@ -11,15 +12,21 @@ import {
   type RecordedRun,
   type RecordedStage,
   RUN_ID,
+  readHistoryRun,
   readOutput,
-  readRun,
 } from "./recorded-data.js";
 import { copyValue, orderedJson } from "./recorded-values.js";
 import { finalizeRecord } from "./run-manifest.js";
-import { type Workflow, workflowDeclarations } from "./typed-workflow.js";
+import {
+  normalizeRefresh,
+  type RefreshOptions,
+  type Workflow,
+  workflowDeclarations,
+} from "./typed-workflow.js";
 import type { JsonValue } from "./types.js";
 export interface PrepareOptions {
-  readonly baseline: null | { readonly runId: string };
+  readonly baseline: null | "latest" | { readonly runId: string };
+  readonly refresh?: RefreshOptions;
   readonly historyDirectory?: string;
   readonly failureMode?: "fail-fast" | "continue-independent";
 }
@@ -42,6 +49,76 @@ function frozen<T>(value: T): T {
   }
   return value;
 }
+function captureBaselineSelection(options: PrepareOptions): PrepareOptions["baseline"] {
+  const selection: unknown = options
+    ? Object.getOwnPropertyDescriptor(options, "baseline")?.value
+    : undefined;
+  if (selection === null) return null;
+  if (selection === "latest") return selection;
+  if (selection && typeof selection === "object" && Reflect.ownKeys(selection).length === 1) {
+    const runId: unknown = Object.getOwnPropertyDescriptor(selection, "runId")?.value;
+    if (typeof runId === "string" && RUN_ID.test(runId)) return { runId };
+  }
+  throw new AbilityBenchError(
+    "invalid_argument",
+    'Choose baseline: null, an exact retained {runId}, or "latest".',
+    "prepare",
+  );
+}
+async function selectBaseline(
+  history: string,
+  workflowId: string,
+  selection: PrepareOptions["baseline"],
+): Promise<RecordedRun | null> {
+  if (selection === null) return null;
+  const operation = "prepare";
+  const context = selection === "latest" ? {} : { runId: selection.runId };
+  try {
+    if (selection === "latest") {
+      let latest: RecordedRun | undefined;
+      for await (const record of scanRuns(history, operation)) {
+        if (
+          record.schemaVersion === "abilitybench-run-v2" &&
+          record.workflowId === workflowId &&
+          (!latest || newestFirst(record, latest) < 0)
+        )
+          latest = record;
+      }
+      if (latest) return latest;
+    } else {
+      const record = await readHistoryRun(history, selection.runId, operation, context);
+      if (record.schemaVersion === "phase0-run-v1")
+        throw new AbilityBenchError(
+          "baseline_incompatible",
+          "Legacy history cannot supply an ordered baseline. Use baseline: null for a deliberate fresh run.",
+          operation,
+          context,
+        );
+      if (record.workflowId !== workflowId)
+        throw new AbilityBenchError(
+          "baseline_workflow_mismatch",
+          "Selected baseline belongs to another workflow.",
+          operation,
+          context,
+        );
+      return record;
+    }
+  } catch (error) {
+    if (
+      !(error instanceof AbilityBenchError) ||
+      (selection === "latest"
+        ? error.code !== "history_not_found" || error.runId !== undefined
+        : error.code !== "history_not_found" && error.code !== "run_not_found")
+    )
+      throw error;
+  }
+  throw new AbilityBenchError(
+    "baseline_not_found",
+    "No selected baseline is available. Use baseline: null for a deliberate fresh run.",
+    operation,
+    context,
+  );
+}
 export async function prepare(
   workflow: Workflow,
   options: PrepareOptions,
@@ -54,21 +131,7 @@ export async function prepareExecution(
   options: PrepareOptions,
   schedule: PublicationSchedule = {},
 ): Promise<PreparedExecution> {
-  if (
-    !options ||
-    !Object.hasOwn(options, "baseline") ||
-    (options.baseline !== null &&
-      (typeof options.baseline !== "object" ||
-        !options.baseline ||
-        Object.keys(options.baseline).length !== 1 ||
-        typeof options.baseline.runId !== "string" ||
-        !RUN_ID.test(options.baseline.runId)))
-  )
-    throw new AbilityBenchError(
-      "invalid_argument",
-      "Choose baseline:null or an exact retained {runId}.",
-      "prepare",
-    );
+  const selection = captureBaselineSelection(options);
   if (
     options.historyDirectory !== undefined &&
     (typeof options.historyDirectory !== "string" || !options.historyDirectory.trim())
@@ -83,57 +146,28 @@ export async function prepareExecution(
   const history = resolve(options.historyDirectory ?? resolve(workflow.root, ".abilitybench"));
   const workflowId = workflow.id,
     root = workflow.root;
-  const baselineId = options.baseline?.runId;
   const graph = workflowDeclarations(workflow);
+  const refresh = normalizeRefresh(options.refresh, graph.handles);
+  const forced = new Set(refresh.stageIds);
   const byId = new Map(graph.stages.map((stage) => [stage.id, stage]));
   const stages: CapturedStage[] = graph.order.map((id) => {
     const item = byId.get(id);
     if (!item) throw new Error("Normalized stage is missing.");
     const { dependencies, ...rest } = item;
+    const bindings = Object.entries(dependencies)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([name, handle]) => ({ name, stageId: handle.id }));
+    if (refresh.scope === "descendants" && bindings.some(({ stageId }) => forced.has(stageId)))
+      forced.add(id);
     return {
       ...rest,
-      bindings: Object.entries(dependencies)
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-        .map(([name, handle]) => ({ name, stageId: handle.id })),
+      bindings,
+      refreshScope: refresh.scope === "all" || forced.has(id) ? refresh.scope : null,
       env: Object.fromEntries(item.environment.map((name) => [name, process.env[name]])),
     };
   });
-  let baseline: RecordedRun | null = null;
-  if (baselineId !== undefined) {
-    try {
-      baseline = await readRun(history, baselineId, "prepare", { runId: baselineId });
-    } catch (error) {
-      if (
-        error instanceof AbilityBenchError &&
-        error.code === "unsupported_history_format" &&
-        error.reason === "phase0-run-v1"
-      )
-        throw new AbilityBenchError(
-          "baseline_incompatible",
-          "Legacy history cannot supply an ordered baseline; use baseline:null for a deliberate fresh run.",
-          "prepare",
-          { runId: baselineId },
-        );
-      if (
-        error instanceof AbilityBenchError &&
-        ["history_not_found", "run_not_found"].includes(error.code)
-      )
-        throw new AbilityBenchError(
-          "baseline_not_found",
-          "Selected baseline is unavailable; use baseline:null for a deliberate fresh run.",
-          "prepare",
-          { runId: baselineId },
-        );
-      throw error;
-    }
-    if (baseline.workflowId !== workflowId)
-      throw new AbilityBenchError(
-        "baseline_workflow_mismatch",
-        "Selected baseline belongs to another workflow.",
-        "prepare",
-        { runId: baselineId },
-      );
-  }
+  const baseline = await selectBaseline(history, workflowId, selection);
+  const baselineId = baseline?.id;
   const baselineSelection: RecordedRun["baseline"] = baseline
     ? {
         runId: baseline.id,
@@ -360,6 +394,7 @@ export async function prepareExecution(
           failureMode,
           records,
           baselineSelection,
+          refresh,
         );
         runId = finalized.record.id;
         await publish(
