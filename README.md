@@ -240,11 +240,6 @@ CLI as those entrypoints become available.
 | Composio / Archie / Gemini | Original provider code, offline guardrails, renderer/domain fixtures and required-effect checks retained privately | Mandatory capture orchestration, old policy and presentation-order reconstruction stay historical; original-renderer/provider witness in #22 with SDK behavior from #12–#18 |
 | Viewer / evaluation / diff | Shared artifact/record corruption, ID, physical-containment and immutable-storage checks run independently of these features | Full deferred suites including independent-reader cases stay private; bounded independent history/comparison replaces lineage/completed-pair/preview/evaluator restrictions in #12/#15/#16 |
 
-The history browsing/comparison slice #15 is implemented; later slices remain pending. Retained sorted codec, old graph,
-fingerprint/execution helpers and phase-0 records are temporary private
-expand/retain/migrate boundaries so useful checks remain green while later tickets
-replace behavior. There is no second coordinator, module-count or code-reduction goal.
-
 ## Independent history SDK and CLI
 
 `openHistory(directory)` needs only retained history. Its asynchronous `runs({workflowId?, limit?})`,
@@ -280,8 +275,16 @@ array length precedes items. Equality is no quality, freshness or reuse verdict.
 Listing scans incrementally, validates every scanned record before filtering and fails on the
 1,001st entry. Results default to 20, allow positive integer limits up to 1,000, and sort by
 recorded finalization time then ID descending. Existing empty history lists `[]`; missing history
-fails. Direct known-run/output reads bypass the scan cap. All entries in `runs/` must be committed
-record filenames; private staging, writer-lock and quarantine directories outside `runs/` are not
-scanned. Corrupt, unreadable or unknown records fail explicitly. Record reads are bounded at
-2 MiB and output payloads at 16 MiB, enforced during actual reads. No truncation or limit override.
-Mixed phase-0 format dispatch remains assigned to #16; this slice reads the ordered format.
+fails. Direct known-run/output reads bypass the scan cap. The scan skips original Phase 0
+`.tmp-<uuid>` staging files in `runs/`. Current staging, writer-lock and quarantine directories
+live outside `runs/`. Corrupt, unreadable or unknown records fail explicitly. Record reads are
+bounded at 2 MiB and output payloads at 16 MiB, enforced during actual reads.
+
+The same four operations read mixed Phase 0 and current history. Narrow SDK inspection on
+`schemaVersion` to access format-specific fields. Phase 0 inspection keeps its original decisions,
+policy reasons, evaluation status, and artifact hashes. The reader verifies the original
+`canonical-json-v1` payloads in `objects/sha256/`; current ordered artifacts carry their own
+header and live in a separate namespace. Comparisons use decoded values and their observable
+key order. Phase 0 stored sorted keys, so the original callback's insertion order cannot be
+recovered. Keep the saved bytes in place and use `baseline: null` to begin a current-format
+execution history.

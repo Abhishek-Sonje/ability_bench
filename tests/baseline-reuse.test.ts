@@ -483,5 +483,8 @@ it("selects exactly one retained baseline and reuses its original observation wi
   });
   const history = openHistory(f.history);
   expect(Object.keys((await history.output(second.runId, "source")) as object)).toEqual(["z", "a"]);
-  expect((await history.run(second.runId)).stages[0]?.preview).toEqual(second.stages[0]?.preview);
+  const inspected = await history.run(second.runId);
+  if (inspected.schemaVersion !== "abilitybench-run-v2")
+    throw new Error("Expected current history.");
+  expect(inspected.stages[0]?.preview).toEqual(second.stages[0]?.preview);
 });

@@ -1,7 +1,7 @@
 import { opendir, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { AbilityBenchError } from "./errors.js";
-import { type RecordedRun, RUN_ID, readRun, validId } from "./recorded-data.js";
+import { type RecordedRun, RUN_ID, readHistoryRun, validId } from "./recorded-data.js";
 
 export interface RunsOptions {
   workflowId?: string;
@@ -9,16 +9,19 @@ export interface RunsOptions {
 }
 export type RunSummary = Pick<
   RecordedRun,
-  | "id"
-  | "workflowId"
-  | "finalizedAt"
-  | "status"
-  | "baseline"
-  | "schemaVersion"
-  | "codec"
-  | "hashScheme"
-  | "fingerprintContract"
->;
+  "id" | "workflowId" | "finalizedAt" | "status" | "codec" | "hashScheme" | "fingerprintContract"
+> &
+  (
+    | Pick<RecordedRun, "schemaVersion" | "baseline">
+    | {
+        schemaVersion: "phase0-run-v1";
+        baseline: {
+          runId: string;
+          recordHash: string;
+          schemaVersion: "phase0-run-v1";
+        } | null;
+      }
+  );
 export async function listRuns(root: string, options: RunsOptions = {}): Promise<RunSummary[]> {
   if (options === null || typeof options !== "object" || Array.isArray(options))
     throw new AbilityBenchError("invalid_argument", "Expected listing options.", "runs");
@@ -58,7 +61,14 @@ export async function listRuns(root: string, options: RunsOptions = {}): Promise
   let scanned = 0;
   try {
     for await (const entry of entries) {
-      // Publication uses staging/ and writer-lock/ outside runs/. No private names in runs/.
+      // The Phase 0 writer staged hard links beside the final record.
+      if (
+        entry.isFile() &&
+        /^\.tmp-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(
+          entry.name,
+        )
+      )
+        continue;
       if (++scanned > 1000)
         throw new AbilityBenchError(
           "read_limit_exceeded",
@@ -71,8 +81,29 @@ export async function listRuns(root: string, options: RunsOptions = {}): Promise
         throw new AbilityBenchError("corrupt_record", "Invalid committed run entry.", "runs", {
           file: resolve(directory, entry.name),
         });
-      const record = await readRun(root, id, "runs", { runId: id });
+      const record = await readHistoryRun(root, id, "runs", { runId: id });
       if (options.workflowId !== undefined && record.workflowId !== options.workflowId) continue;
+      if (record.schemaVersion === "phase0-run-v1") {
+        results.push({
+          id,
+          workflowId: record.workflowId,
+          finalizedAt: record.completedAt,
+          status: record.executionStatus,
+          baseline:
+            record.baselineRunId !== null && record.baselineManifestHash !== null
+              ? {
+                  runId: record.baselineRunId,
+                  recordHash: record.baselineManifestHash,
+                  schemaVersion: record.schemaVersion,
+                }
+              : null,
+          schemaVersion: record.schemaVersion,
+          codec: "canonical-json-v1",
+          hashScheme: "sha256-domain-v1",
+          fingerprintContract: "phase0-v1",
+        });
+        continue;
+      }
       const {
         workflowId,
         finalizedAt,

@@ -2,12 +2,25 @@ import { resolve } from "node:path";
 import { AbilityBenchError } from "./errors.js";
 import { type Comparison, firstDifference } from "./history-compare.js";
 import { listRuns, type RunSummary, type RunsOptions } from "./history-list.js";
-import { type RecordedRun, RUN_ID, readOutput, readRun, validId } from "./recorded-data.js";
+import type { Phase0Run } from "./phase0-history.js";
+import {
+  type RecordedRun,
+  RUN_ID,
+  readHistoryRun,
+  readOutput,
+  readPhase0Output,
+  validId,
+} from "./recorded-data.js";
 import type { JsonValue } from "./types.js";
 
-export interface RunInspection extends RecordedRun {
-  outputReferences: "unchecked";
-}
+export type RunInspection = (
+  | RecordedRun
+  | (Phase0Run & {
+      status: Phase0Run["executionStatus"];
+      finalizedAt: string;
+      codec: "canonical-json-v1";
+    })
+) & { outputReferences: "unchecked" };
 export interface History {
   runs(options?: RunsOptions): Promise<RunSummary[]>;
   run(runId: string): Promise<RunInspection>;
@@ -51,10 +64,17 @@ export function openHistory(historyDirectory: string): History {
     },
     async run(runId) {
       checkRun(runId, "run");
-      return {
-        ...(await readRun(root, runId, "run", { runId })),
-        outputReferences: "unchecked",
-      };
+      const record = await readHistoryRun(root, runId, "run", { runId });
+      if (record.schemaVersion === "phase0-run-v1") {
+        return {
+          ...record,
+          status: record.executionStatus,
+          finalizedAt: record.completedAt,
+          codec: "canonical-json-v1",
+          outputReferences: "unchecked",
+        };
+      }
+      return { ...record, outputReferences: "unchecked" };
     },
     async output(runId, stageId) {
       checkRun(runId, "output");
@@ -66,22 +86,38 @@ export function openHistory(historyDirectory: string): History {
           "output",
           context,
         );
-      const record = await readRun(root, runId, "output", context);
+      const record = await readHistoryRun(root, runId, "output", context);
+      if (record.schemaVersion === "phase0-run-v1") {
+        const stage = record.stages.find((stage) => stage.stageId === stageId);
+        if (!stage) throw stageNotFound(context);
+        if (stage.outputArtifactHash === null)
+          throw outputAbsent(context, stage.executionStatus, stage.decisionReason);
+        return readPhase0Output(root, stage.outputArtifactHash, "output", context);
+      }
       const stage = record.stages.find((stage) => stage.stageId === stageId);
-      if (!stage)
-        throw new AbilityBenchError(
-          "stage_not_found",
-          "Stage is not recorded in this run.",
-          "output",
-          context,
-        );
-      if (stage.output === null)
-        throw new AbilityBenchError("output_absent", "Recorded stage has no output.", "output", {
-          ...context,
-          status: stage.status,
-          reason: stage.actual.reason,
-        });
+      if (!stage) throw stageNotFound(context);
+      if (stage.output === null) throw outputAbsent(context, stage.status, stage.actual.reason);
       return readOutput(root, stage.output, "output", context);
     },
   };
+}
+
+function stageNotFound(context: { runId: string; stageId: string }): AbilityBenchError {
+  return new AbilityBenchError(
+    "stage_not_found",
+    "Stage is not recorded in this run.",
+    "output",
+    context,
+  );
+}
+function outputAbsent(
+  context: { runId: string; stageId: string },
+  status: string,
+  reason: string,
+): AbilityBenchError {
+  return new AbilityBenchError("output_absent", "Recorded stage has no output.", "output", {
+    ...context,
+    status,
+    reason,
+  });
 }

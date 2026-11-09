@@ -1,11 +1,12 @@
 // biome-ignore-all lint/complexity/useLiteralKeys: TypeScript index signatures require bracket access.
 import { spawnSync } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, it } from "vitest";
 import { fixture } from "./fixtures/history-fixture.js";
+import { copyPhase0History, phase0Artifact, phase0Id } from "./fixtures/phase0-fixture.js";
 
 const root = await mkdtemp(join(tmpdir(), "abilitybench installed cli "));
 afterAll(() => rm(root, { recursive: true, force: true }));
@@ -166,4 +167,54 @@ it("buffers corrupt output errors, supports filtering, and inspects failed histo
   expect(out.status).toBe(2);
   expect(out.stdout).toBe("");
   expect(JSON.parse(out.stderr)).toMatchObject({ error: { code: "corrupt_artifact" } });
+});
+
+it("reads mixed Phase 0 and current history through the installed commands", async () => {
+  const f = await fixture('{"a":null,"b":[2,1]}');
+  const equal = await f.save();
+  const g = await fixture('{"b":[2,1],"a":null}');
+  const different = await g.save();
+  const history = join(consumer, "mixed history with spaces");
+  await cp(f.root, history, { recursive: true });
+  await cp(g.root, history, { recursive: true });
+  await copyPhase0History(history);
+  const flags = ["--history", history, "--json"];
+  const record = join(history, "runs", `${phase0Id}.json`);
+  const artifact = join(history, "objects", "sha256", phase0Artifact);
+  const before = await Promise.all([readFile(record), readFile(artifact)]);
+
+  const listing = run(["runs", ...flags]);
+  expect(listing.status).toBe(0);
+  expect(
+    JSON.parse(listing.stdout).map(({ schemaVersion }: { schemaVersion: string }) => schemaVersion),
+  ).toEqual(["abilitybench-run-v2", "abilitybench-run-v2", "phase0-run-v1"]);
+  const inspected = run(["inspect", phase0Id, ...flags]);
+  expect(inspected.status).toBe(0);
+  expect(JSON.parse(inspected.stdout)).toMatchObject({
+    status: "failed",
+    evaluationStatus: "not_run",
+    outputReferences: "unchecked",
+  });
+  const exported = run(["output", phase0Id, "source", ...flags]);
+  expect(exported.status).toBe(0);
+  expect(exported.stdout).toBe('{\n  "a": null,\n  "b": [\n    2,\n    1\n  ]\n}\n');
+  expect(exported.stderr).toBe("");
+  const same = run(["compare", phase0Id, equal, "source", ...flags]);
+  expect(same.status).toBe(0);
+  expect(JSON.parse(same.stdout)).toMatchObject({ equal: true, difference: null });
+  const reversed = run(["compare", phase0Id, different, "source", ...flags]);
+  expect(reversed.status).toBe(1);
+  expect(JSON.parse(reversed.stdout)).toMatchObject({
+    equal: false,
+    difference: { path: "", reason: "object_order" },
+  });
+  expect(await Promise.all([readFile(record), readFile(artifact)])).toEqual(before);
+
+  await writeFile(artifact, "abilitybench-artifact-v8\nfuture-codec\nnull");
+  const unknown = run(["compare", equal, phase0Id, "source", ...flags]);
+  expect(unknown.status).toBe(2);
+  expect(unknown.stdout).toBe("");
+  expect(JSON.parse(unknown.stderr)).toMatchObject({
+    error: { code: "unsupported_history_format", side: "right" },
+  });
 });

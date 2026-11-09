@@ -13,13 +13,16 @@ export function orderedJson(value: unknown): string {
 export function copyValue(value: unknown): JsonValue {
   return JSON.parse(orderedJson(value)) as JsonValue;
 }
-export function parseOrdered(bytes: Uint8Array): JsonValue {
+export function decodeRecordedJson(bytes: Uint8Array): { text: string; value: JsonValue } {
   const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-  const value: unknown = JSON.parse(text);
+  return { text, value: JSON.parse(text) as JsonValue };
+}
+export function parseOrdered(bytes: Uint8Array): JsonValue {
+  const { text, value } = decodeRecordedJson(bytes);
   // Reencoding also rejects duplicate keys, noncanonical number/string spellings,
   // BOM, whitespace and keys whose textual order violates Object.keys order.
   if (orderedJson(value) !== text) throw new Error("Noncanonical ordered JSON.");
-  return value as JsonValue;
+  return value;
 }
 function serialize(value: unknown, path: string, seen: WeakSet<object>): string {
   if (value === null) return "null";

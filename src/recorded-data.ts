@@ -1,18 +1,30 @@
 // biome-ignore-all lint/complexity/useLiteralKeys: Unknown schema fields require index access under noPropertyAccessFromIndexSignature.
-import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { open, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { AbilityBenchError, type ErrorContext } from "./errors.js";
-import { orderedJson, parseOrdered } from "./recorded-values.js";
+import { isPhase0Run, type Phase0Run, parsePhase0, validatePhase0Run } from "./phase0-history.js";
+import {
+  digest,
+  HASH,
+  keys,
+  object,
+  oneOf,
+  pattern,
+  RUN_ID,
+  requireValue,
+  timestamp,
+  validId,
+} from "./recorded-schema.js";
+import { decodeRecordedJson, orderedJson, parseOrdered } from "./recorded-values.js";
 import type { JsonValue } from "./types.js";
 
+const ARTIFACT_PREFIX = "abilitybench-artifact-";
 export const HEADER = "abilitybench-artifact-v2\nordered-json-v1\nsha256-domain-v2\n";
 export const RECORD_LIMIT = 2 * 1024 * 1024;
 export const OUTPUT_LIMIT = 16 * 1024 * 1024;
-export const RUN_ID = /^run_[a-f0-9]{64}$/;
-const HASH = /^sha256:[a-f0-9]{64}$/;
-const ID = /^[a-z][a-z0-9]*(?:[-_][a-z0-9]+)*$/;
+export { digest, RUN_ID, validId } from "./recorded-schema.js";
+
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 type Data = Record<string, unknown>;
 export interface OutputReference {
@@ -37,7 +49,7 @@ export interface RecordedStage {
   error: Data | null;
 }
 export interface RecordedRun {
-  schemaVersion: string;
+  schemaVersion: "abilitybench-run-v2";
   codec: string;
   hashScheme: string;
   fingerprintContract: string;
@@ -52,36 +64,6 @@ export interface RecordedRun {
   failureMode: string;
   refresh: { scope: string; stageIds: string[] };
   stages: RecordedStage[];
-}
-export function digest(domain: string, bytes: string | Uint8Array): string {
-  return `sha256:${createHash("sha256").update(`${domain}\0`).update(bytes).digest("hex")}`;
-}
-export function validId(value: unknown): value is string {
-  return typeof value === "string" && ID.test(value);
-}
-function requireValue(ok: unknown): asserts ok {
-  if (!ok) throw new Error("Invalid recorded schema.");
-}
-function object(value: unknown): asserts value is Data {
-  requireValue(value !== null && typeof value === "object" && !Array.isArray(value));
-}
-function keys(value: unknown, fields: string): asserts value is Data {
-  object(value);
-  const expected = fields.split(",");
-  const actual = Object.keys(value);
-  requireValue(
-    actual.length === expected.length && actual.every((key, index) => key === expected[index]),
-  );
-}
-function oneOf(value: unknown, choices: string): void {
-  requireValue(typeof value === "string" && choices.split(",").includes(value));
-}
-function pattern(value: unknown, regex: RegExp): void {
-  requireValue(typeof value === "string" && regex.test(value));
-}
-function timestamp(value: unknown): void {
-  requireValue(typeof value === "string" && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(value));
-  requireValue(new Date(value).toISOString() === value);
 }
 const reasons =
   "fresh,reuse_not_enabled,refresh,baseline_stage_missing,baseline_output_absent,baseline_policy_ineligible,influences_changed,reuse_unavailable,reused,dependency_blocked,run_stopped";
@@ -416,37 +398,88 @@ function causeCode(error: unknown): string {
     ? String(error.code)
     : "UNKNOWN";
 }
-export async function readRun(
+export function readRun(
   root: string,
   runId: string,
   operation: string,
   context: ErrorContext,
 ): Promise<RecordedRun> {
-  const bytes = await readBounded(
-    root,
-    resolve(root, "runs", `${runId}.json`),
-    RECORD_LIMIT,
-    "record",
-    operation,
-    context,
+  return readRunRecord(root, runId, operation, context, (text, value) =>
+    verifyCurrentRun(text, value, runId),
   );
+}
+
+export function readHistoryRun(
+  root: string,
+  runId: string,
+  operation: string,
+  context: ErrorContext,
+): Promise<RecordedRun | Phase0Run> {
+  return readRunRecord<RecordedRun | Phase0Run>(root, runId, operation, context, (text, value) =>
+    isPhase0Run(value)
+      ? validatePhase0Run(text, value, runId)
+      : verifyCurrentRun(text, value, runId),
+  );
+}
+
+function verifyCurrentRun(text: string, value: JsonValue, runId: string): RecordedRun {
+  requireValue(orderedJson(value) === text);
+  return validateRun(value, runId);
+}
+
+async function readRunRecord<T>(
+  root: string,
+  runId: string,
+  operation: string,
+  context: ErrorContext,
+  verify: (text: string, value: JsonValue) => T,
+): Promise<T> {
+  const file = resolve(root, "runs", `${runId}.json`);
+  const bytes = await readBounded(root, file, RECORD_LIMIT, "record", operation, context);
   try {
-    return validateRun(parseOrdered(bytes), runId);
+    const { text, value } = decodeRecordedJson(bytes);
+    return verify(text, value);
   } catch (error) {
     if (error instanceof AbilityBenchError && error.code === "unsupported_history_format")
       throw new AbilityBenchError(error.code, error.message, operation, {
         ...context,
+        file,
         ...error.context,
       });
     throw new AbilityBenchError(
       "corrupt_record",
       "Run failed schema or integrity verification.",
       operation,
-      {
-        ...context,
-        file: resolve(root, "runs", `${runId}.json`),
-        ...(error instanceof AbilityBenchError ? error.context : {}),
-      },
+      { ...context, file, ...(error instanceof AbilityBenchError ? error.context : {}) },
+    );
+  }
+}
+
+export async function readPhase0Output(
+  root: string,
+  hash: string,
+  operation: string,
+  context: ErrorContext,
+): Promise<JsonValue> {
+  const file = resolve(root, "objects", "sha256", hash.slice(7));
+  const bytes = await readBounded(root, file, OUTPUT_LIMIT, "artifact", operation, context);
+  if (bytes.toString("utf8", 0, ARTIFACT_PREFIX.length) === ARTIFACT_PREFIX)
+    throw new AbilityBenchError(
+      "unsupported_history_format",
+      "Unsupported Phase 0 artifact format.",
+      operation,
+      { ...context, file },
+    );
+  try {
+    requireValue(digest("abilitybench/artifact/v1", bytes) === hash);
+    const { text, value } = decodeRecordedJson(bytes);
+    return parsePhase0(text, value);
+  } catch {
+    throw new AbilityBenchError(
+      "corrupt_artifact",
+      "Artifact failed Phase 0 integrity verification.",
+      operation,
+      { ...context, file },
     );
   }
 }
@@ -480,12 +513,18 @@ export function verifyOutput(
   try {
     reference(ref);
     if (!bytes.subarray(0, Buffer["byteLength"](HEADER)).equals(Buffer.from(HEADER))) {
-      const lines = bytes.toString("utf8", 0, 128).split("\n");
+      const [schema, codec, hashScheme, payload] = bytes.toString("utf8", 0, 128).split("\n", 4);
+      const formatName = /^[a-z][a-z0-9-]*$/;
       if (
-        lines[0]?.startsWith("abilitybench-artifact-") &&
-        (lines[0] !== "abilitybench-artifact-v2" ||
-          (lines[1]?.startsWith("ordered-json-") && lines[1] !== "ordered-json-v1") ||
-          (lines[2]?.startsWith("sha256-domain-") && lines[2] !== "sha256-domain-v2"))
+        schema?.startsWith(ARTIFACT_PREFIX) &&
+        (schema !== "abilitybench-artifact-v2" ||
+          (codec?.startsWith("ordered-json-") && codec !== "ordered-json-v1") ||
+          (hashScheme?.startsWith("sha256-domain-") && hashScheme !== "sha256-domain-v2") ||
+          (payload !== undefined &&
+            codec !== undefined &&
+            formatName.test(codec) &&
+            hashScheme !== undefined &&
+            formatName.test(hashScheme)))
       )
         throw new AbilityBenchError(
           "unsupported_history_format",

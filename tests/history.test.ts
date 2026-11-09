@@ -328,6 +328,10 @@ it.each(["runId", "attemptId", "stageId"])("rejects malformed serialized error %
 it.each([
   "abilitybench-artifact-v3\nordered-json-v1\nsha256-domain-v2\nnull",
   "abilitybench-artifact-v2\nordered-json-v2\nsha256-domain-v2\nnull",
+  "abilitybench-artifact-v2\nfuture-codec\nsha256-domain-v2\nnull",
+  "abilitybench-artifact-v2\nordered-json-v1\nfuture-hash\nnull",
+  "abilitybench-artifact-v2\nordered-json-v3\n",
+  "abilitybench-artifact-v2\nordered-json-v1\nsha256-domain-v3",
 ])("distinguishes recognizable unknown artifacts", async (bytes) => {
   const f = await fixture("null");
   const id = await f.save();
