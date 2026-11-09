@@ -296,6 +296,9 @@ function inside(root: string, path: string): boolean {
   const rel = relative(root, path);
   return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
+// Private real-file harness schedule; never exposed through the SDK.
+type BoundedReadHook = (accumulated: number) => Promise<void>;
+
 export async function readBounded(
   root: string,
   file: string,
@@ -303,8 +306,7 @@ export async function readBounded(
   kind: "record" | "artifact",
   operation: string,
   context: ErrorContext,
-  // Private real-file harness schedule; never exposed through the SDK.
-  afterRead?: (accumulated: number) => Promise<void>,
+  afterRead?: BoundedReadHook,
 ): Promise<Buffer> {
   const ctx = { ...context, file };
   let physicalRoot: string;
@@ -478,6 +480,7 @@ export async function readOutput(
   ref: OutputReference,
   operation: string,
   context: ErrorContext,
+  afterRead?: BoundedReadHook,
 ): Promise<JsonValue> {
   const bytes = await readBounded(
     root,
@@ -486,6 +489,7 @@ export async function readOutput(
     "artifact",
     operation,
     context,
+    afterRead,
   );
   return verifyOutput(bytes, ref, operation, {
     ...context,

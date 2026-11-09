@@ -78,11 +78,19 @@ component identities and artifact integrity. Preview invokes no callbacks or pro
 When upstream actual output is unresolved, a potentially reusable descendant is
 `conditional`, with `unresolvedStages` and `potentialEligibility` in its details.
 Own known changes still predict execution. Preview remains separately recorded;
-actual decisions use actual outputs and new influence/artifact observations.
+actual decisions use actual outputs and new influence/artifact observations. Execution
+observes watches after verifying the selected artifact and before reusing an output
+or invoking a reusable callback. It checks them again after the callback, before
+publishing or passing its output to descendants. A detected change during the callback
+fails the stage with `influence_changed_during_execution`.
 Reasons retain applicable `causes`, named `changedComponents` with before/current
 digests, `changedBindings`, and watch/artifact error codes. Primary precedence is
 blocked/stopped, always-execute, refresh, fresh, missing/ineligible baseline, changed influences,
-unavailable artifact, reused. Failure error codes remain separate.
+unavailable artifact, reused. Failure error codes remain separate. A missing, corrupt
+or unreadable selected artifact makes reuse unavailable. A reached stage gets one
+regeneration attempt against the same selected baseline. Descendants compare the
+regenerated output with the selected output identity. An occupied artifact slot can
+still prevent publication of the regenerated output.
 
 Propagation compares whole ordered outputs, including object/array order and fields
 such as a provider's `requestHash`. Executing a dependency alone does not invalidate

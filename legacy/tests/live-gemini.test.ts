@@ -47,7 +47,7 @@ async function fixture(fastRetries = false, capUsd = 0.1, modelProfile = "flash"
     if (name === "run.mjs") imported = `import "./mock-provider.mjs";\n${imported}`;
     await writeFile(
       join(root, name),
-      fastRetries && name === "run.mjs"
+      fastRetries && name === "adapter.mjs"
         ? imported.replace("await delay(waitMs);", "await Promise.resolve();")
         : imported,
     );

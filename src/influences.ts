@@ -149,12 +149,11 @@ async function containsFileIdentity(
   }
   return false;
 }
-export async function observe(
+export async function observeWatchComponent(
   stage: CapturedStage,
   root: string,
   history: string,
-  outputs: Map<string, string>,
-): Promise<Record<string, string>> {
+): Promise<string> {
   const watches: JsonValue[] = [];
   const physicalPaths = new Set<string>();
   if (stage.reuse === false) throw new Error("Always-execute has no reusable identity.");
@@ -226,6 +225,13 @@ export async function observe(
       right = (b as { path: string }).path;
     return left < right ? -1 : left > right ? 1 : 0;
   });
+  return digest("abilitybench/component/watchedFiles/v2", orderedJson(watches));
+}
+export function observeFixedComponents(
+  stage: CapturedStage,
+  outputs: Map<string, string>,
+): Record<string, string> {
+  if (stage.reuse === false) throw new Error("Always-execute has no reusable identity.");
   const values = {
     contract: {
       codec: "ordered-json-v1",
@@ -248,7 +254,6 @@ export async function observe(
             : digest("abilitybench/environment-value/v2", stage.env[name] as string),
       })),
     implementation: stage.reuse.revision ?? null,
-    watchedFiles: watches,
   };
   return Object.fromEntries(
     Object.entries(values).map(([key, value]) => [

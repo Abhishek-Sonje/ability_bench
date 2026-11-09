@@ -4,7 +4,12 @@ import { isPromise } from "node:util/types";
 import { AbilityBenchError } from "./errors.js";
 import { type PublicationSchedule, publish } from "./filesystem-store.js";
 import { newestFirst, scanRuns } from "./history-list.js";
-import { type CapturedStage, eligibility, observe } from "./influences.js";
+import {
+  type CapturedStage,
+  eligibility,
+  observeFixedComponents,
+  observeWatchComponent,
+} from "./influences.js";
 import {
   digest,
   HEADER,
@@ -126,10 +131,13 @@ export async function prepare(
   return prepareExecution(workflow, options);
 }
 // Private coordinator entry for deterministic real-filesystem fault schedules, never root-exported.
+interface ExecutionSchedule extends PublicationSchedule {
+  afterArtifactRead?: (operation: "prepare" | "execute", stageId: string) => Promise<void>;
+}
 export async function prepareExecution(
   workflow: Workflow,
   options: PrepareOptions,
-  schedule: PublicationSchedule = {},
+  schedule: ExecutionSchedule = {},
 ): Promise<PreparedExecution> {
   const selection = captureBaselineSelection(options);
   if (
@@ -167,7 +175,7 @@ export async function prepareExecution(
     };
   });
   const baseline = await selectBaseline(history, workflowId, selection);
-  const baselineId = baseline?.id;
+
   const baselineSelection: RecordedRun["baseline"] = baseline
     ? {
         runId: baseline.id,
@@ -176,7 +184,26 @@ export async function prepareExecution(
         status: baseline.status,
       }
     : null;
-  const diagnostics = new Map<string, AbilityBenchError>();
+  const { afterArtifactRead } = schedule;
+  async function verifySelectedArtifact(item: CapturedStage, operation: "prepare" | "execute") {
+    if (!baseline || item.reuse === false) return {};
+    const previous = baseline.stages.find((stage) => stage.stageId === item.id);
+    if (previous?.policy !== "reusable" || !previous.output) return {};
+    const reference = previous.output;
+    try {
+      const value = await readOutput(
+        history,
+        reference,
+        operation,
+        { stageId: item.id, runId: baseline.id },
+        afterArtifactRead && (() => afterArtifactRead(operation, item.id)),
+      );
+      return { reference, value };
+    } catch (error) {
+      if (!(error instanceof AbilityBenchError)) throw error;
+      return { error };
+    }
+  }
   const predictions = new Map<string, RecordedStage["preview"]>();
   const predictedHashes = new Map<string, string>();
   for (const item of stages) {
@@ -184,30 +211,23 @@ export async function prepareExecution(
     const unresolved = item.bindings
       .filter((binding) => predictions.get(binding.stageId)?.decision !== "reuse")
       .map((binding) => binding.stageId);
+    let diagnostic: AbilityBenchError | undefined;
+    const oldOutput = baseline?.stages.find((stage) => stage.stageId === item.id)?.output;
+    const artifact = await verifySelectedArtifact(item, "prepare");
     if (item.reuse !== false)
       try {
-        components = await observe(item, root, history, predictedHashes);
+        components = observeFixedComponents(item, predictedHashes);
+        components = {
+          ...components,
+          watchedFiles: await observeWatchComponent(item, root, history),
+        };
       } catch (error) {
         if (!(error instanceof AbilityBenchError)) throw error;
-        diagnostics.set(item.id, error);
-      }
-    let artifactError: AbilityBenchError | undefined;
-    const diagnostic = diagnostics.get(item.id);
-    const oldStage = baseline?.stages.find((s) => s.stageId === item.id);
-    const oldOutput = oldStage?.output;
-    if (item.reuse !== false && oldStage?.policy === "reusable" && oldOutput)
-      try {
-        await readOutput(history, oldOutput, "prepare", {
-          stageId: item.id,
-          runId: baselineId as string,
-        });
-      } catch (error) {
-        if (!(error instanceof AbilityBenchError)) throw error;
-        artifactError = error;
+        diagnostic = error;
       }
     const prediction = eligibility(item, baseline, components, predictedHashes, {
       unresolved: [...new Set(unresolved)],
-      artifactError,
+      artifactError: artifact.error,
       influenceError: diagnostic,
     });
     predictions.set(item.id, prediction);
@@ -276,49 +296,61 @@ export async function prepareExecution(
           continue;
         }
         let callbackInvoked = false;
+        let artifactError: AbilityBenchError | undefined;
+        let fixedComponents: Record<string, string> | null = null;
         try {
-          if (item.reuse !== false) {
-            record.components = await observe(item, root, history, hashes);
+          const artifact = await verifySelectedArtifact(item, "execute");
+          artifactError = artifact.error;
+          // Artifact verification can do substantial I/O. Observe after it.
+          if (item.reuse !== false) fixedComponents = observeFixedComponents(item, hashes);
+          const components = fixedComponents
+            ? { ...fixedComponents, watchedFiles: await observeWatchComponent(item, root, history) }
+            : null;
+          let actual = eligibility(item, baseline, components, hashes, { artifactError });
+          let context: Parameters<typeof item.run>[0] | undefined;
+          if (actual.decision !== "reuse") {
+            context = {
+              inputs: copyValue(item.inputs) as typeof item.inputs,
+              dependencies: Object.fromEntries(
+                item.bindings.map((binding) => [
+                  binding.name,
+                  copyValue(values.get(binding.stageId)),
+                ]),
+              ),
+              env: { ...item.env },
+            };
+            // Copying accepted inputs can take time. Refresh the only mutable part of
+            // the identity before invoking the callback.
+            if (components && item.reuse !== false && item.reuse.files?.length) {
+              components.watchedFiles = await observeWatchComponent(item, root, history);
+              actual = eligibility(item, baseline, components, hashes, { artifactError });
+            }
+          }
+          record.components = components;
+          if (components)
             record.fingerprint = digest(
               "abilitybench/fingerprint/declared-influences-v2",
-              orderedJson({ workflowId, stageId: item.id, components: record.components }),
+              orderedJson({ workflowId, stageId: item.id, components }),
             );
+          record.actual = actual;
+          if (actual.decision === "reuse" && artifact.reference) {
+            record.status = "reused";
+            record.output = artifact.reference;
+            values.set(item.id, artifact.value);
+            hashes.set(item.id, artifact.reference.hash);
+            continue;
           }
-          record.actual = eligibility(item, baseline, record.components, hashes);
-          const oldStage = baseline?.stages.find((s) => s.stageId === item.id);
-          const oldOutput = oldStage?.output;
-          if (item.reuse !== false && oldStage?.policy === "reusable" && oldOutput) {
-            let reused: JsonValue | undefined;
-            try {
-              reused = await readOutput(history, oldOutput, "execute", {
-                stageId: item.id,
-                runId: baselineId as string,
-              });
-            } catch (error) {
-              if (!(error instanceof AbilityBenchError)) throw error;
-              record.actual = eligibility(item, baseline, record.components, hashes, {
-                artifactError: error,
-              });
-            }
-            if (record.actual.decision === "reuse") {
-              record.status = "reused";
-              record.output = oldOutput;
-              values.set(item.id, reused as JsonValue);
-              hashes.set(item.id, oldOutput.hash);
-              continue;
-            }
-          }
-          const dependencies = Object.fromEntries(
-            item.bindings.map((binding) => [binding.name, copyValue(values.get(binding.stageId))]),
-          );
+          if (!context) throw new Error("Eligible reuse is missing a verified artifact.");
+          let returned: unknown;
           callbackInvoked = true;
-          const returned = item.run({
-            inputs: copyValue(item.inputs) as typeof item.inputs,
-            dependencies,
-            env: { ...item.env },
-          });
+          try {
+            const pending = item.run(context);
+            returned = isPromise(pending) ? await pending : pending;
+          } catch {
+            throw new AbilityBenchError("callback_failed", "Stage callback failed.", "callback");
+          }
           // Synchronous callbacks are copied before yielding; asynchronous results are copied immediately on settlement.
-          const output = copyValue(isPromise(returned) ? await returned : returned);
+          const output = copyValue(returned);
           const observedAt = new Date().toISOString();
           const payload = orderedJson(output),
             byteLength = Buffer.byteLength(payload);
@@ -329,9 +361,22 @@ export async function prepareExecution(
               "output",
               { limit: OUTPUT_LIMIT, actualBytes: byteLength },
             );
-          if (item.reuse !== false) {
-            const after = await observe(item, root, history, hashes);
-            if (orderedJson(after) !== orderedJson(record.components))
+          if (item.reuse !== false && item.reuse.files?.length) {
+            const after = await observeWatchComponent(item, root, history).catch(
+              (error: unknown) => {
+                if (!(error instanceof AbilityBenchError)) throw error;
+                throw new AbilityBenchError(
+                  "influence_changed_during_execution",
+                  "Declared influence became unavailable during callback.",
+                  "execute",
+                  {
+                    ...(error.file ? { file: error.file } : {}),
+                    causeCode: error.causeCode ?? error.code,
+                  },
+                );
+              },
+            );
+            if (after !== components?.watchedFiles)
               throw new AbilityBenchError(
                 "influence_changed_during_execution",
                 "Declared influences changed during callback.",
@@ -358,7 +403,8 @@ export async function prepareExecution(
           failureDescendants.add(item.id);
           record.status = "failed";
           if (!callbackInvoked && item.reuse !== false)
-            record.actual = eligibility(item, baseline, record.components, hashes, {
+            record.actual = eligibility(item, baseline, fixedComponents, hashes, {
+              artifactError,
               influenceError: error instanceof AbilityBenchError ? error : undefined,
             });
           record.actual = {
@@ -414,7 +460,7 @@ export async function prepareExecution(
             ...(runId || coded?.runId ? { runId: runId ?? (coded?.runId as string) } : {}),
             causeCode: coded?.causeCode ?? coded?.code ?? "UNKNOWN",
             reason: coded?.code ?? "UNKNOWN",
-            status: runId ? "uncertain" : "not_published",
+            status: coded?.status ?? (runId ? "uncertain" : "not_published"),
             ...(coded?.file ? { file: coded.file } : {}),
             ...(coded?.limit !== undefined ? { limit: coded.limit } : {}),
             ...(coded?.actualBytes !== undefined ? { actualBytes: coded.actualBytes } : {}),

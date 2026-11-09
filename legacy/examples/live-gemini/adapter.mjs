@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { canonicalizeJson, defineWorkflow } from "../../dist/index.js";
 import {
   EXAMPLE_VERSION,
@@ -312,4 +313,137 @@ export async function buildWorkflow(root, toolMetrics) {
     });
   }
   return builder.build();
+}
+
+export function createGeminiGenerator({ apiKey, evidence, budget, ledger, persist }) {
+  let completedCaptures = 0;
+  let resolvedModelVersion = null;
+
+  async function generate(stageId, body, scenario, dependencies, prompt) {
+    for (let attempt = 1; attempt <= RETRY_POLICY.maxAttemptsPerStage; attempt++) {
+      // Leave worst-case headroom for every still-required successful capture.
+      try {
+        budget.preflight(PROTOCOL_CALLS - completedCaptures);
+      } catch (error) {
+        error.failureOrigin = "budget_guard";
+        throw error;
+      }
+      let timeout;
+      try {
+        timeout = budget.reserve(body);
+      } catch (error) {
+        error.failureOrigin = "budget_guard";
+        throw error;
+      }
+      const entry = {
+        scenario,
+        stageId,
+        attempt,
+        requestHash: digest({ model: SETTINGS.model, body }),
+        status: "dispatched",
+        startedAt: new Date().toISOString(),
+        usage: null,
+        elapsedMs: null,
+      };
+      ledger.push(entry);
+      await persist();
+      const started = performance.now();
+      let attemptFailure;
+      let retryAfter = null;
+      let failureOrigin = "provider";
+      try {
+        // Header only: never place credentials in a URL, log, artifact, or error diagnostic.
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${SETTINGS.model}:generateContent`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(Math.ceil(timeout)),
+          },
+        );
+        entry.httpStatus = response.status;
+        if (!response.ok) {
+          retryAfter = response.headers.get("Retry-After");
+          const diagnostic = await response.json().catch(() => null);
+          throw new Error(providerFailure(response.status, diagnostic, apiKey));
+        }
+        const value = await response.json();
+        const usage = usageFromResponse(value);
+        entry.usage = usage;
+        failureOrigin = "budget_guard";
+        budget.record(usage);
+        failureOrigin = "provider";
+        if (typeof value.modelVersion !== "string" || !value.modelVersion)
+          throw new Error("Response did not record a resolved model version.");
+        resolvedModelVersion ??= value.modelVersion;
+        if (value.modelVersion !== resolvedModelVersion)
+          throw new Error("Provider model version changed during the experiment.");
+        const candidate = value.candidates?.[0];
+        const text = candidate?.content?.parts
+          ?.filter((part) => !part.thought && typeof part.text === "string")
+          .map((part) => part.text)
+          .join("");
+        if (candidate?.finishReason !== "STOP" || !text?.trim())
+          throw new Error("Response was blocked, truncated, or empty. No retry.");
+        const snapshot = {
+          requestHash: entry.requestHash,
+          modelVersion: value.modelVersion,
+          text,
+          usageMetadata: value.usageMetadata,
+        };
+        failureOrigin = "adapter";
+        await writeFile(
+          join(evidence, `${scenario}-${stageId}-request.json`),
+          canonicalizeJson({ model: SETTINGS.model, body }),
+        );
+        await writeFile(
+          join(evidence, `${scenario}-${stageId}-response.json`),
+          JSON.stringify(value, null, 2),
+        );
+        failureOrigin = "grounding_validation";
+        validateStageOutput(stageId, text, dependencies, prompt);
+        entry.status = "completed";
+        completedCaptures++;
+        return snapshot;
+      } catch (error) {
+        entry.status = "failed";
+        // A 503 remains fully reserved, but may be retried under the bounded policy.
+        if (entry.usage === null && entry.httpStatus !== 503) budget.unknownUsage = true;
+        // Preserve a safe diagnostic only; fetch's cause may contain request internals.
+        entry.failure =
+          error instanceof Error && !error.message.includes(apiKey)
+            ? error.message
+            : "Provider call failed.";
+        entry.failureOrigin = failureOrigin;
+        attemptFailure = new Error(entry.failure);
+        attemptFailure.failureOrigin = failureOrigin;
+      } finally {
+        entry.elapsedMs = performance.now() - started;
+        await persist();
+      }
+      if (entry.httpStatus !== 503 || attempt >= RETRY_POLICY.maxAttemptsPerStage)
+        throw attemptFailure;
+      let waitMs;
+      try {
+        waitMs = retryDelay(attempt, retryAfter);
+        budget.preflight(PROTOCOL_CALLS - completedCaptures);
+        if (performance.now() - budget.started + waitMs >= 300_000)
+          throw new Error("Retry wait exceeds the five-minute experiment deadline.");
+      } catch (error) {
+        error.failureOrigin = "retry_guard";
+        throw error;
+      }
+      entry.retryDelayMs = waitMs;
+      await persist();
+      await delay(waitMs);
+    }
+  }
+
+  return {
+    generate,
+    get resolvedModelVersion() {
+      return resolvedModelVersion;
+    },
+  };
 }

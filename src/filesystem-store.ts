@@ -112,6 +112,7 @@ export async function publish(
   let tempIdentity: { dev: number; ino: number } | undefined;
   let token: string | undefined;
   let preserve = false;
+  let commitPossible = false;
   let primaryError: unknown;
   let cleanupFailure: unknown;
   const lock = join(root, "writer-lock");
@@ -203,6 +204,7 @@ export async function publish(
     };
     try {
       await occupied();
+      commitPossible = true;
     } catch (error) {
       if (
         !(error instanceof AbilityBenchError) ||
@@ -230,14 +232,23 @@ export async function publish(
       } catch (linkError) {
         if (osCode(linkError) !== "EEXIST") throw linkError;
       }
+      commitPossible = true;
       await occupied();
       await schedule.linked?.(file);
     }
   } catch (error) {
     primaryError = error;
-    if (error instanceof AbilityBenchError) throw error;
+    const status = commitPossible ? "uncertain" : "not_published";
+    if (error instanceof AbilityBenchError) {
+      if (artifact) throw error;
+      throw new AbilityBenchError(error.code, error.message, error.operation, {
+        ...error.context,
+        status,
+      });
+    }
     throw new AbilityBenchError("publication_failed", "Immutable publication failed.", "publish", {
       causeCode: osCode(error),
+      ...(!artifact ? { status } : {}),
     });
   } finally {
     let cleanupError: unknown;
@@ -276,6 +287,6 @@ export async function publish(
       "publication_failed",
       "Publication cleanup failed; history acknowledgment is uncertain.",
       "publish",
-      { causeCode: osCode(cleanupFailure), file: lock },
+      { causeCode: osCode(cleanupFailure), file: lock, status: "uncertain" },
     );
 }

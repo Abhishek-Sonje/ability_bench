@@ -1,11 +1,19 @@
 // biome-ignore-all lint/complexity/useLiteralKeys: TypeScript requires index access for dynamic error metadata.
-import { mkdir, mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { prepareExecution } from "../src/execution.js";
-import { createWorkflow, type JsonValue, openHistory, prepare, stage } from "../src/index.js";
-import { OUTPUT_LIMIT } from "../src/recorded-data.js";
+import {
+  AbilityBenchError,
+  createWorkflow,
+  type JsonValue,
+  openHistory,
+  prepare,
+  stage,
+} from "../src/index.js";
+
+const OUTPUT_LIMIT = 16 * 1024 * 1024;
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -28,11 +36,23 @@ it.each([0, 1])(
         return "x".repeat(OUTPUT_LIMIT - 2 + extra);
       },
     });
+    let consumed = 0;
+    const consumer = stage({
+      id: "consumer",
+      dependencies: { s },
+      run: ({ dependencies }) => {
+        consumed++;
+        return dependencies.s.length;
+      },
+    });
     const result = await (
-      await prepare(createWorkflow({ id: "bounds", root: r, stages: [s] }), { baseline: null })
+      await prepare(createWorkflow({ id: "bounds", root: r, stages: [s, consumer] }), {
+        baseline: null,
+      })
     ).execute();
     expect(calls).toBe(1);
     if (extra === 0) {
+      expect(consumed).toBe(1);
       expect(result.status).toBe("completed");
       expect(result.stages[0]?.output?.byteLength).toBe(OUTPUT_LIMIT);
       expect(
@@ -40,6 +60,8 @@ it.each([0, 1])(
           .length,
       ).toBe(OUTPUT_LIMIT - 2);
     } else {
+      expect(consumed).toBe(0);
+      expect(result.stages[1]?.actual.reason).toBe("dependency_blocked");
       expect(result.status).toBe("failed");
       expect(result.stages[0]).toMatchObject({
         output: null,
@@ -56,26 +78,76 @@ it.each([0, 1])(
   },
   20000,
 );
-it("record overflow throws with identity and never returns saved-history success", async () => {
+it("accepts an exact 2 MiB final record and rejects one extra metadata byte", async () => {
   const r = await root();
-  const seed = stage({ id: "seed", run: () => null });
-  const s = stage({
-    id: "wide",
-    dependencies: Object.fromEntries([["x".repeat(2 * 1024 * 1024), seed]]),
-    run: () => null,
-  });
-  const p = await prepare(createWorkflow({ id: "bounds", root: r, stages: [seed, s] }), {
-    baseline: null,
-  });
-  await expect(p.execute()).rejects.toMatchObject({
+  const history = join(r, ".abilitybench");
+  const limit = 2 * 1024 * 1024;
+  async function prepared(bindingLength: number) {
+    const seed = stage({ id: "seed", run: () => null });
+    const wide = stage({
+      id: "wide",
+      dependencies: Object.fromEntries([["x".repeat(bindingLength), seed]]),
+      run: () => null,
+    });
+    return prepare(createWorkflow({ id: "bounds", root: r, stages: [seed, wide] }), {
+      baseline: null,
+    });
+  }
+  async function recordSize(runId: string) {
+    return (await stat(join(history, "runs", `${runId}.json`))).size;
+  }
+
+  // Vary only the binding metadata. The SDK-generated envelope is included in the measured size.
+  const calibration = await (await prepared(1)).execute();
+  const exactLength = limit - (await recordSize(calibration.runId)) + 1;
+  const exact = await (await prepared(exactLength)).execute();
+  expect(await recordSize(exact.runId)).toBe(limit);
+  expect((await openHistory(history).run(exact.runId)).id).toBe(exact.runId);
+
+  const overflow = await prepared(exactLength + 1);
+  const rejected = overflow.execute();
+  await expect(rejected).rejects.toMatchObject({
     code: "finalization_failed",
     causeCode: "record_limit_exceeded",
     attemptId: expect.any(String),
     runId: expect.stringMatching(/^run_/),
-    limit: 2 * 1024 * 1024,
+    limit,
+    actualBytes: limit + 1,
+    status: "not_published",
   });
-  await expect(stat(join(r, ".abilitybench", "runs"))).rejects.toMatchObject({ code: "ENOENT" });
-  await expect(p.execute()).rejects.toMatchObject({ code: "prepared_execution_used" });
+  const error = await rejected.catch((reason: AbilityBenchError) => reason);
+  if (!(error instanceof AbilityBenchError) || !error.runId) throw new Error("Missing run ID");
+  await expect(openHistory(history).run(error.runId)).rejects.toMatchObject({
+    code: "run_not_found",
+  });
+  expect(await openHistory(history).runs()).toHaveLength(2);
+  await expect(overflow.execute()).rejects.toMatchObject({ code: "prepared_execution_used" });
+});
+
+it("reports staged final-record schema failure with known identity and sanitized context", async () => {
+  const r = await root();
+  const history = join(r, ".abilitybench");
+  const prepared = await prepareExecution(
+    createWorkflow({ id: "bad-record", root: r, stages: [] }),
+    { baseline: null },
+    { staged: async (file) => writeFile(file, '{"secret":"never report this"}') },
+  );
+  const rejected = prepared.execute();
+  await expect(rejected).rejects.toMatchObject({
+    code: "finalization_failed",
+    operation: "finalize",
+    reason: "corrupt_record",
+    status: "not_published",
+    attemptId: expect.any(String),
+    runId: expect.stringMatching(/^run_/),
+  });
+  const error = await rejected.catch((reason: AbilityBenchError) => reason);
+  if (!(error instanceof AbilityBenchError) || !error.runId) throw new Error("Missing run ID");
+  expect(JSON.stringify(error)).not.toContain("never report this");
+  await expect(openHistory(history).run(error.runId)).rejects.toMatchObject({
+    code: "run_not_found",
+  });
+  expect(await openHistory(history).runs()).toEqual([]);
 });
 it("reports uncertain acknowledgment after actual record publication and permits direct reconciliation", async () => {
   const r = await root();
@@ -90,20 +162,26 @@ it("reports uncertain acknowledgment after actual record publication and permits
       },
     },
   );
-  let identity = "";
-  try {
-    await p.execute();
-    throw new Error("Expected finalization rejection");
-  } catch (error) {
-    expect(error).toMatchObject({
-      code: "finalization_failed",
-      causeCode: "EIO",
-      reason: "publication_failed",
-      status: "uncertain",
-    });
-    identity = (error as { runId: string }).runId;
-  }
-  expect(await openHistory(join(r, ".abilitybench")).output(identity, "source")).toBeNull();
+  const rejected = p.execute();
+  await expect(rejected).rejects.toMatchObject({
+    code: "finalization_failed",
+    operation: "finalize",
+    causeCode: "EIO",
+    reason: "publication_failed",
+    status: "uncertain",
+    attemptId: expect.any(String),
+    runId: expect.stringMatching(/^run_/),
+  });
+  const error = await rejected.catch((reason: AbilityBenchError) => reason);
+  if (!(error instanceof AbilityBenchError) || !error.runId) throw new Error("Missing run ID");
+  expect(JSON.stringify(error)).not.toContain("lost acknowledgment");
+  const history = openHistory(join(r, ".abilitybench"));
+  expect(await history.run(error.runId)).toMatchObject({
+    id: error.runId,
+    attemptId: error.attemptId,
+    status: "completed",
+  });
+  expect(await history.output(error.runId, "source")).toBeNull();
   await expect(p.execute()).rejects.toMatchObject({ code: "prepared_execution_used" });
 });
 it("fails output publication after callback without retry and retains prior outputs", async () => {
@@ -145,11 +223,21 @@ it("leaves a conservatively blocked lock when owner-token writing fails", async 
       },
     },
   );
-  await expect(p.execute()).rejects.toMatchObject({
+  const rejected = p.execute();
+  await expect(rejected).rejects.toMatchObject({
     code: "finalization_failed",
+    operation: "finalize",
     causeCode: expect.stringMatching(/EEXIST|EISDIR/),
     reason: "publication_failed",
+    status: "not_published",
+    attemptId: expect.any(String),
+    runId: expect.stringMatching(/^run_/),
   });
+  const error = await rejected.catch((reason: AbilityBenchError) => reason);
+  if (!(error instanceof AbilityBenchError) || !error.runId) throw new Error("Missing run ID");
+  const history = openHistory(join(r, ".abilitybench"));
+  await expect(history.run(error.runId)).rejects.toMatchObject({ code: "run_not_found" });
+  expect(await history.runs()).toEqual([]);
   expect((await stat(join(r, ".abilitybench", "writer-lock"))).isDirectory()).toBe(true);
 });
 const unsupported: unknown[] = [

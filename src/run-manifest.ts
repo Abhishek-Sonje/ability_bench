@@ -46,5 +46,14 @@ export function finalizeRecord(
       "finalize",
       { attemptId, runId: id, limit: RECORD_LIMIT, actualBytes: bytes.length },
     );
-  return { record: validateRun(parseOrdered(bytes), id), bytes };
+  try {
+    return { record: validateRun(parseOrdered(bytes), id), bytes };
+  } catch {
+    throw new AbilityBenchError(
+      "corrupt_record",
+      "Final record failed schema or identity verification.",
+      "finalize",
+      { attemptId, runId: id },
+    );
+  }
 }

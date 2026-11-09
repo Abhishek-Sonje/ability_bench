@@ -3,6 +3,7 @@ import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
+import { createWorkflow, openHistory, prepare, stage } from "../src/index.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -81,3 +82,62 @@ it("rejects invalid identities in a child process before writing", async () => {
   });
   expect(await readdir(r)).toEqual([]);
 });
+
+it("terminates a hanging SDK callback without committing or reusing its attempt", async () => {
+  const r = await root();
+  const history = join(r, ".abilitybench");
+  let seedCalls = 0;
+  let hangingCalls = 0;
+  const seed = stage({
+    id: "seed",
+    reuse: { revision: "one" },
+    run: () => {
+      seedCalls++;
+      return "committed";
+    },
+  });
+  const hanging = stage({
+    id: "hanging",
+    reuse: { revision: "one" },
+    dependencies: { seed },
+    run: () => ++hangingCalls,
+  });
+  const workflow = createWorkflow({ id: "interrupt", root: r, stages: [seed, hanging] });
+  const committed = await (await prepare(workflow, { baseline: null })).execute();
+  const runPath = join(history, "runs", `${committed.runId}.json`);
+  const bytes = await readFile(runPath);
+  const child = spawn(process.execPath, ["tests/fixtures/interrupted-execution.mjs", r], {
+    timeout: 8000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+    stdout += chunk;
+    if (stdout.includes("hanging\n")) child.kill();
+  });
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+    stderr += chunk;
+  });
+  const exit = await new Promise<number | null>((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+  expect(exit).not.toBe(0);
+  expect(stderr).toBe("");
+  expect(stdout).toBe("hanging\n");
+  await expect(stat(join(r, "resumed"))).rejects.toMatchObject({ code: "ENOENT" });
+  expect(await readFile(runPath)).toEqual(bytes);
+  expect(await readdir(join(history, "staging"))).toEqual(["interrupted.tmp"]);
+  expect(
+    await readdir(join(history, "objects", "abilitybench-artifact-v2", "sha256")),
+  ).toHaveLength(3);
+  const reader = openHistory(history);
+  expect((await reader.runs()).map(({ id }) => id)).toEqual([committed.runId]);
+  expect(await reader.output(committed.runId, "seed")).toBe("committed");
+  const recovery = await prepare(workflow, { baseline: "latest" });
+  expect(recovery.preview.baseline?.runId).toBe(committed.runId);
+  const result = await recovery.execute();
+  expect(result.stages.map(({ status }) => status)).toEqual(["reused", "reused"]);
+  expect([seedCalls, hangingCalls]).toEqual([1, 1]);
+}, 12000);
