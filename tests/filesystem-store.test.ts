@@ -54,9 +54,14 @@ it("publishes a closed verified hard link and preserves identical occupied inode
 it("rejects malformed incoming bytes before creating state or deleting foreign temps", async () => {
   const r = await root(),
     p = candidate();
-  await expect(
-    publish(r, { ...p, bytes: Buffer.from(HEADER + '{"x":1,"x":2}') }),
-  ).rejects.toMatchObject({ code: "corrupt_artifact" });
+  await expect(publish(r, candidate('{"x":1,"x":2}'))).rejects.toMatchObject({
+    code: "corrupt_artifact",
+  });
+  await expect(publish(r, { ...p, bytes: candidate('{"y":2,"b":1}').bytes })).rejects.toMatchObject(
+    {
+      code: "corrupt_artifact",
+    },
+  );
   expect(await readdir(r)).toEqual([]);
   await expect(publish(r, { ...p, identity: "../outside" })).rejects.toMatchObject({
     code: "invalid_argument",
@@ -70,7 +75,7 @@ it("rejects malformed incoming bytes before creating state or deleting foreign t
 it("refuses valid different occupied bytes under a private injected digest collision", async () => {
   const r = await root(),
     a = candidate(),
-    b = candidate('{"a":1,"z":2}');
+    b = candidate('{"different":true}');
   await publish(r, a);
   const before = await stat(slot(r, a));
   if (!b.reference) throw new Error("Fixture reference missing.");
@@ -85,13 +90,13 @@ it("refuses valid different occupied bytes under a private injected digest colli
   expect(await readFile(slot(r, a))).toEqual(a.bytes);
   expect((await stat(slot(r, a))).ino).toBe(before.ino);
 });
-it("refuses corrupt occupied bytes without repair and cleans only its own temp", async () => {
+it("refuses headerless occupied bytes and cleans only its own temp", async () => {
   const r = await root(),
     p = candidate();
   await publish(r, p);
-  await writeFile(slot(r, p), HEADER + "broken");
-  await expect(publish(r, p)).rejects.toMatchObject({ code: "corrupt_artifact" });
-  expect(await readFile(slot(r, p), "utf8")).toBe(HEADER + "broken");
+  await writeFile(slot(r, p), "broken");
+  await expect(publish(r, p)).rejects.toMatchObject({ code: "repair_refused" });
+  expect(await readFile(slot(r, p), "utf8")).toBe("broken");
   expect(await readdir(join(r, "staging"))).toEqual([]);
 });
 it("reopens bounded staged data and refuses tampering before commit", async () => {
@@ -153,4 +158,27 @@ it("normalizes real lock cleanup failures without deleting foreign evidence", as
   expect(await readFile(join(r, "writer-lock", "foreign-evidence"), "utf8")).toBe("preserve");
   expect(await readdir(join(r, "staging"))).toEqual([]);
   expect(await readFile(slot(r, p))).toEqual(p.bytes);
+});
+
+it("retains repair staging if lock cleanup fails after the replacement is verified", async () => {
+  const r = await root();
+  const p = candidate();
+  await publish(r, p);
+  const bad = Buffer.from("abilitybench-artifact-v2\n");
+  await writeFile(slot(r, p), bad);
+  await expect(
+    publish(r, p, {
+      locked: async (lock) => {
+        await writeFile(join(lock, "foreign-evidence"), "preserve");
+      },
+    }),
+  ).rejects.toMatchObject({ code: "publication_failed" });
+  const [entry] = await readdir(join(r, "quarantine"));
+  const tx = join(r, "quarantine", entry ?? "");
+  const descriptor = JSON.parse(await readFile(join(tx, "transaction.json"), "utf8"));
+  expect(await readFile(descriptor.incoming.stagedFile)).toEqual(p.bytes);
+  expect(await readFile(join(tx, "corrupt"))).toEqual(bad);
+  expect(await readFile(join(tx, "complete"), "utf8")).toBe("");
+  expect(await readFile(slot(r, p))).toEqual(p.bytes);
+  expect(await readFile(join(r, "writer-lock", "foreign-evidence"), "utf8")).toBe("preserve");
 });

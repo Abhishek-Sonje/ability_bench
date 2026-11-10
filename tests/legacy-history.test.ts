@@ -187,7 +187,7 @@ it("applies the actual 16 MiB payload bound without a header allowance for Phase
 
 it.each([
   ["abilitybench-artifact-v8\nfuture-codec\nnull", "unsupported_history_format"],
-  ['{"a":null,"b":[2,1]}', "corrupt_artifact"],
+  ['{"a":null,"b":[2,1]}', "repair_refused"],
 ])("refuses to replace unprovable bytes in a current object slot", async (bytes, code) => {
   const f = await fixture('{"a":null,"b":[2,1]}');
   await copyPhase0History(f.root);

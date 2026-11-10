@@ -142,10 +142,22 @@ Writers stage exclusive same-volume files, close/reopen and boundedly verify the
 then coordinate through the history-wide `writer-lock` directory with an owner token.
 Coordination waits at most five seconds before `storage_busy`; callbacks hold no lock.
 No-clobber hard links publish only complete verified inodes. Identical occupied data
-preserves its inode; collisions, corruption and unsafe/unreadable slots are refused.
-Only owned safe temps and the matching owner's lock are cleaned. Runs are immutable;
-this slice does not repair artifacts. Orphan staging files, lock and quarantine
-entries are not finalized runs. Readers never acquire locks or repair data.
+preserves its inode. Collisions and slots whose format, bytes or identity cannot
+be established safely are refused.
+
+For a demonstrably corrupt artifact in a known format, the writer creates a
+quarantine transaction with a descriptor identifying the slot, corrupt bytes
+and staged replacement. It hard-links the corrupt inode into quarantine and
+rechecks the descriptor, preserved bytes and occupied inode before removing
+the corrupt name. It publishes the verified replacement with a no-clobber
+hard link, verifies the final slot and marks completion. Quarantine is retained.
+If publication fails after removal, the staged replacement and quarantine
+evidence remain. The stage fails without retrying its callback.
+
+Older successful references to the same hash can read the restored artifact.
+Runs remain immutable. Only owned safe temps and the matching owner's lock
+are cleaned. Orphan staging files, lock and quarantine entries are excluded from
+finalized history. Readers never acquire locks or repair data.
 
 If a process stops with an abandoned lock, stop **all** users of that history and
 establish exclusive administrative ownership; age/PID guesses are insufficient.

@@ -1,6 +1,6 @@
 // biome-ignore-all lint/complexity/useLiteralKeys: Unknown schema fields require index access under noPropertyAccessFromIndexSignature.
-import { constants } from "node:fs";
-import { open, realpath, stat } from "node:fs/promises";
+import { type BigIntStats, constants } from "node:fs";
+import { lstat, open, realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { AbilityBenchError, type ErrorContext } from "./errors.js";
 import { isPhase0Run, type Phase0Run, parsePhase0, validatePhase0Run } from "./phase0-history.js";
@@ -19,8 +19,9 @@ import {
 import { decodeRecordedJson, orderedJson, parseOrdered } from "./recorded-values.js";
 import type { JsonValue } from "./types.js";
 
+export const ARTIFACT_SCHEMA = "abilitybench-artifact-v2";
 const ARTIFACT_PREFIX = "abilitybench-artifact-";
-export const HEADER = "abilitybench-artifact-v2\nordered-json-v1\nsha256-domain-v2\n";
+export const HEADER = `${ARTIFACT_SCHEMA}\nordered-json-v1\nsha256-domain-v2\n`;
 export const RECORD_LIMIT = 2 * 1024 * 1024;
 export const OUTPUT_LIMIT = 16 * 1024 * 1024;
 export { digest, RUN_ID, validId } from "./recorded-schema.js";
@@ -297,7 +298,7 @@ function inside(root: string, path: string): boolean {
   return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 // Private real-file harness schedule; never exposed through the SDK.
-type BoundedReadHook = (accumulated: number) => Promise<void>;
+export type BoundedReadHook = (accumulated: number) => Promise<void>;
 
 export async function readBounded(
   root: string,
@@ -308,6 +309,39 @@ export async function readBounded(
   context: ErrorContext,
   afterRead?: BoundedReadHook,
 ): Promise<Buffer> {
+  return (await readSnapshot(root, file, limit, kind, operation, context, afterRead)).bytes;
+}
+
+export interface RecordedFile {
+  bytes: Buffer;
+  identity: BigIntStats;
+}
+
+export function sameInode(left: BigIntStats, right: BigIntStats): boolean {
+  return left.ino !== 0n && left.ino === right.ino && left.dev === right.dev;
+}
+
+// Writers require the name itself to denote the inode read, without following aliases.
+export function readPublicationFile(
+  root: string,
+  file: string,
+  limit: number,
+  kind: "record" | "artifact",
+  afterRead?: BoundedReadHook,
+): Promise<RecordedFile> {
+  return readSnapshot(root, file, limit, kind, "publish", {}, afterRead, true);
+}
+
+async function readSnapshot(
+  root: string,
+  file: string,
+  limit: number,
+  kind: "record" | "artifact",
+  operation: string,
+  context: ErrorContext,
+  afterRead?: BoundedReadHook,
+  publication = false,
+): Promise<RecordedFile> {
   const ctx = { ...context, file };
   let physicalRoot: string;
   try {
@@ -322,7 +356,18 @@ export async function readBounded(
     );
   }
   let handle: Awaited<ReturnType<typeof open>> | undefined;
+  let observedName: BigIntStats | undefined;
   try {
+    if (publication) {
+      observedName = await lstat(file, { bigint: true });
+      if (!observedName.isFile())
+        throw new AbilityBenchError(
+          "unsafe_path",
+          "Publication entry must be a regular file.",
+          operation,
+          ctx,
+        );
+    }
     const physical = await realpath(file);
     if (!inside(physicalRoot, physical))
       throw new AbilityBenchError("unsafe_path", "History path escapes directory.", operation, ctx);
@@ -330,7 +375,7 @@ export async function readBounded(
       file,
       constants.O_RDONLY | (process.platform === "win32" ? 0 : constants.O_NONBLOCK),
     );
-    const before = await handle.stat();
+    const before = await handle.stat({ bigint: true });
     if (!before.isFile())
       throw new AbilityBenchError(
         "unsafe_path",
@@ -338,10 +383,10 @@ export async function readBounded(
         operation,
         ctx,
       );
-    const named = await stat(await realpath(file));
+    const named = await stat(await realpath(file), { bigint: true });
     if (
-      before.dev !== named.dev ||
-      before.ino !== named.ino ||
+      !sameInode(before, named) ||
+      (observedName && !sameInode(before, observedName)) ||
       !inside(physicalRoot, await realpath(file))
     )
       throw new AbilityBenchError("unsafe_path", "History path identity changed.", operation, ctx);
@@ -362,12 +407,12 @@ export async function readBounded(
       chunks.push(buffer.subarray(0, bytesRead));
       await afterRead?.(total);
     }
-    const after = await handle.stat();
+    const after = await handle.stat({ bigint: true });
     if (
-      before.size !== total ||
-      after.size !== total ||
-      before.mtimeMs !== after.mtimeMs ||
-      before.ctimeMs !== after.ctimeMs
+      before.size !== BigInt(total) ||
+      after.size !== BigInt(total) ||
+      before.mtimeNs !== after.mtimeNs ||
+      before.ctimeNs !== after.ctimeNs
     )
       throw new AbilityBenchError(
         kind === "record" ? "corrupt_record" : "corrupt_artifact",
@@ -375,12 +420,19 @@ export async function readBounded(
         operation,
         ctx,
       );
-    return Buffer.concat(chunks, total);
+    if (publication && !sameInode(before, await lstat(file, { bigint: true })))
+      throw new AbilityBenchError(
+        "unsafe_path",
+        "Publication path identity changed.",
+        operation,
+        ctx,
+      );
+    return { bytes: Buffer.concat(chunks, total), identity: after };
   } catch (error) {
     if (error instanceof AbilityBenchError) throw error;
     const code = causeCode(error);
     throw new AbilityBenchError(
-      code === "ENOENT"
+      code === "ENOENT" && !observedName
         ? kind === "record"
           ? "run_not_found"
           : "artifact_not_found"
@@ -496,6 +548,18 @@ export async function readOutput(
     file: resolve(root, "objects", "abilitybench-artifact-v2", "sha256", ref.hash.slice(7)),
   });
 }
+function artifactHeaderFields(bytes: Buffer): string[] {
+  const fields: string[] = [];
+  let start = 0;
+  for (let field = 0; field < 3; field++) {
+    const end = bytes.indexOf(10, start);
+    fields.push(bytes.toString("utf8", start, end < 0 ? bytes.length : end));
+    if (end < 0) break;
+    start = end + 1;
+  }
+  return fields;
+}
+
 // Shared incoming/occupied/read verification; the optional digest is private collision-fixture support.
 export function verifyOutput(
   bytes: Buffer,
@@ -507,18 +571,15 @@ export function verifyOutput(
   try {
     reference(ref);
     if (!bytes.subarray(0, Buffer["byteLength"](HEADER)).equals(Buffer.from(HEADER))) {
-      const [schema, codec, hashScheme, payload] = bytes.toString("utf8", 0, 128).split("\n", 4);
+      const [schema, codec, hashScheme] = artifactHeaderFields(bytes);
       const formatName = /^[a-z][a-z0-9-]*$/;
       if (
         schema?.startsWith(ARTIFACT_PREFIX) &&
-        (schema !== "abilitybench-artifact-v2" ||
-          (codec?.startsWith("ordered-json-") && codec !== "ordered-json-v1") ||
-          (hashScheme?.startsWith("sha256-domain-") && hashScheme !== "sha256-domain-v2") ||
-          (payload !== undefined &&
-            codec !== undefined &&
-            formatName.test(codec) &&
-            hashScheme !== undefined &&
-            formatName.test(hashScheme)))
+        (schema !== ARTIFACT_SCHEMA ||
+          (codec !== undefined && formatName.test(codec) && codec !== "ordered-json-v1") ||
+          (hashScheme !== undefined &&
+            formatName.test(hashScheme) &&
+            hashScheme !== "sha256-domain-v2"))
       )
         throw new AbilityBenchError(
           "unsupported_history_format",

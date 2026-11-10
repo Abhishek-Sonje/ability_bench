@@ -121,7 +121,7 @@ it.each([
   ["before", "missing", true],
   ["after", "missing", false],
   ["before", "corrupt", false],
-  ["after", "corrupt", false],
+  ["after", "corrupt", true],
   ["before", "unreadable", false],
   ["after", "unreadable", false],
 ] as const)(
