@@ -32,11 +32,13 @@ export interface Publication {
 export interface PublicationSchedule {
   staged?: (file: string) => Promise<void>;
   beforeOwner?: (lock: string) => Promise<void>;
+  contended?: (lock: string) => Promise<void>;
   locked?: (lock: string) => Promise<void>;
   linked?: (file: string) => Promise<void>;
   hashDigest?: typeof digest;
   occupiedRead?: BoundedReadHook;
   quarantined?: (file: string) => Promise<void>;
+  quarantineVerified?: (file: string) => Promise<void>;
   removed?: (file: string) => Promise<void>;
   beforeLink?: (file: string) => Promise<void>;
 }
@@ -245,12 +247,18 @@ export async function publish(
     };
     await verifyStaging();
     const deadline = performance.now() + 5000;
+    const onContention = schedule.contended;
+    let notified = false;
     while (true) {
       try {
         await mkdir(lock);
         break;
       } catch (error) {
         if (osCode(error) !== "EEXIST") throw error;
+        if (onContention && !notified) {
+          notified = true;
+          await onContention(lock);
+        }
         if (performance.now() >= deadline)
           throw new AbilityBenchError(
             "storage_busy",
@@ -342,6 +350,7 @@ export async function publish(
       }
     }
     if (transaction) {
+      await schedule.quarantineVerified?.(join(transaction, "corrupt"));
       // From this point on a failure must leave the recovery evidence intact.
       preserve = true;
       await unlink(file);

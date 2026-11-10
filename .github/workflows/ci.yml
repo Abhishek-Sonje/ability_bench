@@ -38,4 +38,15 @@ jobs:
           require-lockfile: true
 
       - name: Run quality gate
-        run: pnpm check:isolated
+        shell: pwsh
+        run: |
+          node --version
+          pnpm --version
+          $historyTemp = node -p "require('node:os').tmpdir()"
+          if ($IsWindows) {
+            Get-Volume -FilePath $historyTemp | Format-List DriveLetter, FileSystem
+          } else {
+            findmnt -n -o FSTYPE -T $historyTemp
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          pnpm check:isolated

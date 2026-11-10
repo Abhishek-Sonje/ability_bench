@@ -160,15 +160,25 @@ are cleaned. Orphan staging files, lock and quarantine entries are excluded from
 finalized history. Readers never acquire locks or repair data.
 
 If a process stops with an abandoned lock, stop **all** users of that history and
-establish exclusive administrative ownership; age/PID guesses are insufficient.
-Inspect the owner and transaction evidence, verify any final slot first and preserve
-valid data. A missing slot may be linked from a still-verified staged replacement;
-otherwise leave it unavailable. Preserve quarantine and never rerun callbacks as
-storage recovery. Remove an abandoned lock only after ensuring its old process
-cannot resume, then prepare a new attempt. There is no automatic lock stealing,
-history rewriting or callback resumption. Support is local one-volume NTFS/ext4 with
-exclusive-create/hard-link capability, not hostile path replacement, network storage
-or power-loss durability.
+keep them stopped while you establish exclusive administrative ownership. Confirm
+that any paused writer has exited and cannot resume. The token's timestamp and PID
+are diagnostic only, and an empty lock can indicate interruption before the token
+was written.
+
+Preserve the lock information, quarantine descriptor, corrupt bytes and staging.
+Verify the final slot first and leave verified content in place. For a missing
+slot, verify the staged file against the transaction's expected format, length and
+domain hash. For current artifacts, hash the UTF-8 prefix
+`abilitybench/artifact/v2` followed by a zero byte and the entire staged file
+with SHA-256. Use a same-volume hard link that fails if the slot is occupied.
+Verify the linked slot before returning the history to service. Leave the slot
+unavailable if the replacement cannot be verified. Keep quarantine and do not run
+callbacks or rewrite runs during maintenance. Remove the abandoned lock last,
+then prepare a new attempt if needed. A run linked before the process exited may
+already be inspectable even if the caller received no result.
+The protocol supports cooperative users on one local NTFS or ext4 volume with
+exclusive-create and hard-link capability. Hostile path replacement, network
+storage and power-loss durability are outside that guarantee.
 
 ```ts
 import { openHistory } from "abilitybench";
