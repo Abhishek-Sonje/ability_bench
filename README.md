@@ -1,50 +1,175 @@
 # AbilityBench
 
-AbilityBench is being prepared as a recorded-result SDK and independent history CLI
-for local TypeScript workflows. The authoritative release contract is
-[specification #10](https://github.com/Abhishek-Sonje/ability_bench/issues/10).
+AbilityBench records and reuses selected results in local TypeScript workflows.
+Declare stages with the SDK, then inspect, compare or export their recorded outputs
+with the independent history CLI.
 
-This checkout implements isolated supported sources (#11), selected ordered-history
-reads (#12), typed execution (#13–14), independent mixed-format history (#15–16),
-and frozen baseline selection and refresh (#17).
-It is an intermediate private development version, not a qualified 0.1.0 release.
-The root exports `stage`, `createWorkflow`, `prepare`, `openHistory`, `AbilityBenchError`
-and their associated types.
+## Try it offline
+
+Use Node >=24.20.0 <25. In an empty consumer directory, create an ESM project and
+install `abilitybench@0.1.0`. Before registry publication, use the locally built
+tarball in place of the registry package.
+
+```sh
+npm init -y
+npm pkg set type=module
+npm install abilitybench@0.1.0
+```
+
+For the local candidate, replace the install line with
+`npm install "/path/to/abilitybench-0.1.0.tgz"`.
+
+Save the following as `app.ts`. These stand in for the functions and validator
+already owned by your application. Both functions are local and deterministic.
 
 ```ts
-import { stage, createWorkflow, prepare, openHistory } from "abilitybench";
+export function loadFacts() {
+  return { topic: "shared inbox", monthlyCost: 20 };
+}
 
-const research = stage({
-  id: "research",
-  inputs: { prompt: "Find useful options" },
-  environment: ["RESEARCH_ENDPOINT"],
-  reuse: { revision: "research-v1" },
-  run: async ({ inputs, env }) => existingResearch(inputs.prompt, env.RESEARCH_ENDPOINT),
+export function validateReport(value: unknown, prompt: string) {
+  if (typeof value !== "string" || !value.startsWith(prompt + ": ")) {
+    throw new Error("Report does not match the requested prompt");
+  }
+}
+```
+
+Save this as `onboard.ts` and run `node onboard.ts`. Node 24 can run these
+examples directly with type stripping. To type-check them, use a TypeScript
+consumer with `typescript` and `@types/node` installed. Run
+`npx tsc --ignoreConfig --noEmit --strict --module NodeNext --types node --allowImportingTsExtensions onboard.ts`.
+
+```ts
+import { createWorkflow, openHistory, prepare, stage } from "abilitybench";
+import { loadFacts, validateReport } from "./app.ts";
+
+const root = import.meta.dirname;
+const historyDirectory = `${root}/history with spaces`;
+const facts = stage({
+  id: "facts",
+  reuse: { revision: "facts-v1" },
+  run: loadFacts,
+});
+
+function workflow(prompt: string) {
+  const report = stage({
+    id: "report",
+    inputs: { prompt },
+    dependencies: { facts },
+    reuse: { revision: "report-v1" },
+    run: ({ inputs, dependencies }) =>
+      `${inputs.prompt}: ${dependencies.facts.topic} ($${dependencies.facts.monthlyCost}/mo)`,
+  });
+  return createWorkflow({ id: "inbox-report", root, stages: [facts, report] });
+}
+
+const first = await prepare(workflow("Brief"), { baseline: null, historyDirectory });
+console.log(first.preview);
+const baseline = await first.execute();
+if (baseline.status === "failed") throw new Error(`Inspect failed run ${baseline.runId}`);
+
+const prompt = "Recommendation";
+const changed = await prepare(workflow(prompt), {
+  baseline: { runId: baseline.runId },
+  historyDirectory,
+});
+console.log(changed.preview); // facts reuses, report executes with changed inputs
+const next = await changed.execute();
+if (next.status === "failed") throw new Error(`Inspect failed run ${next.runId}`);
+console.log(next.stages.map(({ stageId, actual }) => [stageId, actual.reason]));
+console.log({ baseline: baseline.runId, changed: next.runId });
+
+// Your application can do this later without loading the workflow.
+validateReport(await openHistory(historyDirectory).output(next.runId, "report"), prompt);
+```
+
+Replace FIRST and CHANGED below with the printed run IDs. Run the CLI from the
+consumer directory. A different report makes the comparison exit 1.
+
+```sh
+npm exec -- abilitybench runs --history "history with spaces" --workflow inbox-report
+npm exec -- abilitybench inspect CHANGED --history "history with spaces" --json
+npm exec -- abilitybench compare FIRST CHANGED report --history "history with spaces"
+npm exec -- abilitybench output CHANGED report --history "history with spaces" > report.json
+```
+
+After a successful export, save this as `validate-export.ts` and run
+`node validate-export.ts` to call the same application validator independently.
+
+```ts
+import { readFile } from "node:fs/promises";
+import { validateReport } from "./app.ts";
+
+const value: unknown = JSON.parse(await readFile("report.json", "utf8"));
+validateReport(value, "Recommendation");
+```
+
+Use the same type-check command for each example file. Two successful exports
+can be compared with your usual diff tool. `output` emits the full pretty JSON
+value without an envelope.
+All four commands accept `--history` (default `.abilitybench` in the current
+directory) and `--json`. Exit 0 means success or equality, 1 means a difference,
+and 2 means usage or read failure. Under `--json`, errors use
+`{ "error": { "code": "...", "message": "...", "operation": "..." } }` on stderr
+with applicable context and empty stdout. Check the exit code before consuming
+a redirected file. A failed historical run is inspectable with exit 0.
+`runs` returns up to 20 results by default (`--limit` accepts 1–1,000).
+It scans at most 1,000 committed records across both known formats, before
+filtering. A larger scan fails. Direct known-run reads bypass the scan limit.
+
+## Migrate an earlier workflow
+
+- Replace fluent builders, selectors and cache/config factories with direct
+  `stage` declarations, typed dependency handles and ordinary stage-local
+  inputs. Put application config validation in your application.
+- Replace disabled/volatile with always-execute (omit `reuse` or use `false`).
+  Replace required files-plus-revision with exact files **or** an explicit
+  revision. Both can be supplied when each tracks a separate influence.
+- Replace separate plan/run calls with one `prepare`, its `preview` and its
+  single-use `execute()`. Replace manual artifact decoding with `openHistory`.
+  Earlier source APIs require migration to these entry points.
+- Phase 0 history is readable in its recorded sorted order. Start with
+  `baseline: null` to write a compatible ordered run. Phase 0 records cannot be
+  execution baselines. Compatible failed runs can supply their successful
+  reusable outputs.
+
+Save as `migrate.ts` next to `app.ts` and run `node migrate.ts`. This deliberately
+starts a fresh baseline and shows a file-only watch and an always-execute stage.
+
+```ts
+import { createWorkflow, openHistory, prepare, stage } from "abilitybench";
+import { loadFacts, validateReport } from "./app.ts";
+
+const root = import.meta.dirname;
+const historyDirectory = `${root}/migration history`;
+const facts = stage({
+  id: "facts",
+  reuse: { files: ["app.ts"] },
+  run: loadFacts,
 });
 const report = stage({
   id: "report",
-  dependencies: { research },
-  run: ({ dependencies }) => existingReport(dependencies.research),
+  dependencies: { facts },
+  inputs: { prompt: "Migration" },
+  reuse: false,
+  run: ({ inputs, dependencies }) => `${inputs.prompt}: ${dependencies.facts.topic}`,
 });
-const workflow = createWorkflow({ id: "research-report", root: import.meta.dirname,
-  stages: [research, report] });
-const prepared = await prepare(workflow, { baseline: null });
-console.log(prepared.preview); // callback-free; creates no run state
-const result = await prepared.execute(); // single-use, including after rejection
-if (result.status === "failed") process.exitCode = 1;
-const retained = await prepare(workflow, { baseline: { runId: result.runId } });
-console.log(retained.preview); // research can reuse; report always executes when reached
-const next = await retained.execute();
-const saved = await openHistory(`${import.meta.dirname}/.abilitybench`)
-  .output(next.runId, "report");
+const workflow = createWorkflow({ id: "migrated-report", root, stages: [facts, report] });
+const prepared = await prepare(workflow, { baseline: null, historyDirectory });
+console.log(prepared.preview);
+const result = await prepared.execute();
+if (result.status === "failed") throw new Error(`Inspect failed run ${result.runId}`);
+validateReport(await openHistory(historyDirectory).output(result.runId, "report"), "Migration");
 ```
 
-The callbacks above are your existing application functions. Stage dependencies are
-registered handles keyed by nonempty binding names; multiple aliases are allowed.
-Graph validation rejects duplicate/unsafe IDs, forged/out-of-graph handles, self
-references and cycles. Available traversal ties follow stage declaration order.
-Ordinary inputs and metadata need no factories or schema language; keep application
-validators for domain configuration and provider responses.
+The value boundary now preserves object-key enumeration and array order. Each
+callback and history read gets independent mutable copies. Relative exact-file
+watches stay within the workflow root and explicit absolute paths may reference
+external files. History itself cannot be watched. Descendants use whole actual
+ordered outputs to decide reuse. A callback can execute and return equal output,
+allowing descendants to reuse. Order-only changes can propagate.
+
+## Execution and history
 
 `baseline: null` deliberately executes fresh. `{ runId }` selects exactly one retained,
 verified, compatible same-workflow run in the chosen history directory. Missing selection
@@ -113,7 +238,7 @@ Declare every relevant prompt/model/setting as stage inputs and every dependency
 binding, environment name, implementation revision and exact watched source/helper/prompt
 file. Bookkeeping names/physical paths normalize without sorting nested user values.
 Disk checks do not detect every A→B→A change or prove an atomic external observation.
-Use `refresh: { stages: [research] }` to resample selected stages. The default scope
+Use `refresh: { stages: [facts] }` to resample selected stages. The default scope
 is `"selected"`. Use `scope: "descendants"` with a stage list to include its transitive
 descendants, or `refresh: { scope: "all" }` for the whole workflow. An all-scope request
 cannot include a stage list. Refresh runs reached callbacks and leaves prior records
@@ -177,19 +302,13 @@ callbacks or rewrite runs during maintenance. Remove the abandoned lock last,
 then prepare a new attempt if needed. A run linked before the process exited may
 already be inspectable even if the caller received no result.
 The protocol supports cooperative users on one local NTFS or ext4 volume with
-exclusive-create and hard-link capability. Hostile path replacement, network
-storage and power-loss durability are outside that guarantee.
+exclusive-create and hard-link capability. Hostile path replacement, network or
+cloud-synced storage, and power-loss durability are outside that guarantee.
+Your application owns provider deadlines and cancellation. A hanging callback
+may require terminating the process. Read limits bound serialized bytes, with
+no guarantee about heap usage.
 
-```ts
-import { openHistory } from "abilitybench";
-
-const history = openHistory("/absolute/path/to/history");
-const inspection = await history.run(runId); // outputReferences: "unchecked"
-const value = await history.output(runId, "report"); // ordinary mutable JSON, including null
-// Pass value to an existing application validator.
-```
-
-These two reads need no workflow, source root, configuration or providers. Inspection
+The independent history reads need no workflow, source root, configuration or providers. Inspection
 verifies the selected record and reference schemas; output verifies only the selected
 artifact. Successful outputs remain readable from failed runs, baseline chains and
 always-execute stages, without ancestors or unrelated artifacts. Reads never create,
@@ -201,8 +320,7 @@ New records use `abilitybench-run-v2`, `ordered-json-v1`, `sha256-domain-v2` and
 by compact ordered JSON. Object enumeration (including integer keys) and array order
 are preserved. Acyclic repeated references copy independently; escaped lone surrogates
 are allowed. Unsupported JSON values, descriptors and prototypes reject without
-calling getters or `toJSON`. The old sorted codec checks remain transitional internal
-checks for the retained machinery, not expectations for new recorded values.
+calling getters or `toJSON`.
 
 Run reads are bounded to 2 MiB; output payloads to 16 MiB plus the exact fixed header
 overhead. Reads check opened regular files, physical containment, actual accumulated
@@ -213,9 +331,25 @@ absent output, missing/corrupt/unreadable data, unknown format and exceeded limi
 is returned. Storage is private: new objects occupy a separate format namespace and
 no storage/codec/testing API is exported.
 
-## Development checks
 
-Use Node >=24.20.0 <25 and the pinned pnpm version from `package.json`.
+## Support and development
+
+The supported root exports are `stage`, `createWorkflow`, `prepare`,
+`openHistory`, `AbilityBenchError` and associated types. The supported runtime
+is Node >=24.20.0 <25 with ESM on Windows x64/NTFS and Linux x64/ext4. Keep
+history on one local volume with exclusive creation and hard-link support.
+Histories and quarantine grow over time. While idle, archive the entire history
+directory and deliberately start fresh in a new one. Archived runs remain
+inspectable. AbilityBench provides no automatic cleanup.
+
+Patches in 0.1.x preserve documented SDK, CLI, error and history contracts,
+including the agreed `phase0-run-v1`/`phase0-artifact-v1` with `canonical-json-v1`
+reader and the current ordered format. Breaking changes require a new minor
+and migration notes. The latest published minor receives best-effort support
+through [GitHub issues](https://github.com/Abhishek-Sonje/ability_bench/issues),
+with no SLA or LTS commitment.
+
+Use the pinned pnpm version from `package.json` for checkout development.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -223,106 +357,8 @@ pnpm check
 pnpm check:isolated
 ```
 
-`check` runs supported lint, a clean build, typechecking and tests. Supported source
-sets are `src/`, `tests/` and root build/test scripts and configurations. CI runs
-`check:isolated` on Windows and Ubuntu: it copies only supported source sets into a
-new temporary directory containing spaces, shares installed development dependencies,
-and runs `check` with no legacy sources or prebuilt output. This proves source
-isolation; packed consumers and four-configuration release qualification remain later gates.
-
-The build cleans only generated root `dist/` before emitting supported internals,
-preventing retired CLI/viewer/evaluation files from surviving an incremental build.
-Package files are allowlisted to compiled JavaScript/types and README. Package exports
-permit only the root entrypoint. Final identity, licensing/notices, supported runtime
-exports, broader clean-consumer qualification belongs to #21/#24; installed history CLI checks are in #15.
-
-## Private historical prototype
-
-`legacy/` retains the original viewer, evaluation, execution/planning/config CLI,
-manifest diff, dependent examples, fixtures and all 29 historical test suites. Its
-frozen internal dependency closure is self-contained: historical checks do not import
-changing supported sources. Its private package provides historical examples' self-import
-resolution, without creating a supported legacy API.
-
-```sh
-pnpm legacy:build
-pnpm legacy:typecheck
-pnpm legacy:test
-pnpm legacy:check
-pnpm legacy:viewer
-```
-
-These opt-in checks are outside release gates. Test fixtures use offline transports;
-live provider/example scripts still require separate authorization. Existing phase
-documents, experiment/completion reports, `PRODUCT.md`, `plan.md`,
-`execution-contract.md`, and original onboarding retained in `legacy/README.md`
-are historical. Their results and old contracts do not establish acceptance of the
-new release. Paths in historical reports refer to the original layout; corresponding
-examples now live under `legacy/examples/`.
-
-## Retained and superseded regression expectations
-
-This table records every category in #10's prior-art table. Supported tests exercise
-retained private machinery during prefactoring, without making old low-level interfaces
-public. Subsequent slices move behavioral coverage to the supported SDK and installed
-CLI as those entrypoints become available.
-
-| Prior art | Transferred supported checks | Historical expectations and replacement slices |
-| --- | --- | --- |
-| Typed workflow / graph | Dependency inference, wrong-type compile rejection, registered handles, ID grammar, duplicate IDs, missing/self dependencies, cycles, callback-free assembly | Fluent builder, factory metadata, selectors, files AND revision and lexical traversal ties stay private; ordinary inputs/declaration-order graph in #13, reuse declarations in #14 |
-| Serialization | Unsupported values, cycles, descriptor checks without invoking getters, symbols/extra array properties, byte/hash verification and decoding | Sorted-key equality, global shared-reference and lone-surrogate rejection stay private; ordered/versioned values, escaped paths and mutable copies in #12/#13 |
-| Fingerprint / planning / execution | Watched byte changes, environment presence without secret persistence, invalid/non-file watches, missing dependency identity, direct dependencies, zero-call reuse and late file checks | Old propagation, disabled/volatile split, selectors, reusable missing-watch identities and public-input revalidation stay private; replacement behavior in #14/#17/#18 |
-| Runner | Callback-free assembly and immutable run identity checks transferred to graph/manifest suites | Separate plan/run, explicit baseline, watched-history rejection, root-only storage and global input suites stay runnable privately; replacements in #13/#14/#17/#18 |
-| Filesystem / manifest / path | All original filesystem/path suites, manifest hash/ID tampering, referenced-artifact verification, deduplication, own-temp cleanup and interrupted temps; real-process publication/collision/ID fixtures | Original formats are temporary fixture scaffolding; bounded schema-valid reads in #12/#16, publication/repair/process schedules in #13/#19/#20; missing-history and failed-baseline expectations replaced in #12/#17 |
-| CLI process / commands | Private storage child processes retain real streams/exits, spaced paths and failure checks | Original command/process suites retained privately; config imports, run/plan/evaluate and manifest metadata diff do not define supported history; installed CLI coverage in #15/#21 |
-| Composio / Archie / Gemini | Original provider code, offline guardrails, renderer/domain fixtures and required-effect checks retained privately | Mandatory capture orchestration, old policy and presentation-order reconstruction stay historical; original-renderer/provider witness in #22 with SDK behavior from #12–#18 |
-| Viewer / evaluation / diff | Shared artifact/record corruption, ID, physical-containment and immutable-storage checks run independently of these features | Full deferred suites including independent-reader cases stay private; bounded independent history/comparison replaces lineage/completed-pair/preview/evaluator restrictions in #12/#15/#16 |
-
-## Independent history SDK and CLI
-
-`openHistory(directory)` needs only retained history. Its asynchronous `runs({workflowId?, limit?})`,
-`run(runId)`, `output(runId, stageId)` and `compare(runA, runB, stageId)` never load workflow,
-configuration, provider or evaluator code or repair history. Inspection includes dependencies,
-baseline, separate preview/actual reasons, failures/skips and `outputReferences: "unchecked"`.
-Successful outputs in failed runs and chains remain readable without ancestors. Each read returns
-independent mutable JSON. Application validators judge domain validity and quality.
-
-The installed `abilitybench` binary supports exactly:
-
-```sh
-abilitybench runs --history "history directory" --workflow research-report --limit 20
-abilitybench inspect RUN --history "history directory" --json
-abilitybench output RUN report --history "history directory" > before.json
-abilitybench compare RUN_A RUN_B report --history "history directory" --json
-```
-
-All four commands accept `--history` (default `./.abilitybench`) and `--json`.
-`output` always prints complete pretty JSON in recorded order, including with `--json`, without
-an envelope. Export two outputs and use an existing text diff tool for detailed changes.
-Exit status is 0 for success/equal, 1 for different, 2 for usage/read failure. Errors go only to
-stderr and use `{error:{code,message,operation,...context}}` with `--json`. Automation must check
-the exit code: shell redirection may create an empty destination on failure.
-
-Comparison verifies both complete selected outputs, even for identical selections/references.
-It accepts unrelated, same-run, cross-workflow, failed and chained runs. It returns selected
-`left`/`right` identities, `equal`, and `difference: null` or one `{path,reason}`. Reasons are
-`type`, `value`, `object_keys`, `object_order`, `array_length`; array item differences recurse.
-JSON Pointers escape `~` and `/`; the root is `""`. Object key sets precede order and values;
-array length precedes items. Equality is no quality, freshness or reuse verdict.
-
-Listing scans incrementally, validates every scanned record before filtering and fails on the
-1,001st entry. Results default to 20, allow positive integer limits up to 1,000, and sort by
-recorded finalization time then ID descending. Existing empty history lists `[]`; missing history
-fails. Direct known-run/output reads bypass the scan cap. The scan skips original Phase 0
-`.tmp-<uuid>` staging files in `runs/`. Current staging, writer-lock and quarantine directories
-live outside `runs/`. Corrupt, unreadable or unknown records fail explicitly. Record reads are
-bounded at 2 MiB and output payloads at 16 MiB, enforced during actual reads.
-
-The same four operations read mixed Phase 0 and current history. Narrow SDK inspection on
-`schemaVersion` to access format-specific fields. Phase 0 inspection keeps its original decisions,
-policy reasons, evaluation status, and artifact hashes. The reader verifies the original
-`canonical-json-v1` payloads in `objects/sha256/`; current ordered artifacts carry their own
-header and live in a separate namespace. Comparisons use decoded values and their observable
-key order. Phase 0 stored sorted keys, so the original callback's insertion order cannot be
-recovered. Keep the saved bytes in place and use `baseline: null` to begin a current-format
-execution history.
+The isolation gate runs the supported lint, build, typecheck and tests with
+`legacy/` absent. The older phase documents, examples, experiments and
+completion reports are historical. The private prototype remains available via
+`pnpm legacy:build`, `pnpm legacy:typecheck`, `pnpm legacy:test` and
+`pnpm legacy:check`. Historical results do not qualify the supported package.

@@ -1,8 +1,13 @@
 {
   "name": "abilitybench",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Dependency-aware incremental execution for deterministic developer workflows.",
+  "version": "0.1.0",
+  "description": "Recorded-result SDK and independent history CLI for local TypeScript workflows.",
+  "license": "MIT",
+  "author": "Abhishek Sonje",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Abhishek-Sonje/ability_bench.git"
+  },
   "type": "module",
   "exports": {
     ".": {
@@ -41,7 +46,8 @@
   "files": [
     "dist/*.js",
     "dist/*.d.ts",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "bin": {
     "abilitybench": "./dist/cli.js"

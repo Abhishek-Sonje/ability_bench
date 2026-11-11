@@ -1,7 +1,7 @@
 // biome-ignore-all lint/complexity/useLiteralKeys: TypeScript index signatures require bracket access.
 import { spawnSync } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, expect, it } from "vitest";
@@ -30,7 +30,7 @@ const install = spawnSync(
     "add",
     "--offline",
     "--ignore-scripts",
-    join(root, "abilitybench-0.0.0.tgz"),
+    join(root, "abilitybench-0.1.0.tgz"),
   ],
   { cwd: consumer, encoding: "utf8" },
 );
@@ -38,6 +38,40 @@ if (install.status !== 0) throw new Error(install.stdout + install.stderr);
 const cli = join(consumer, "node_modules", "abilitybench", "dist", "cli.js");
 const run = (args: string[]) =>
   spawnSync(process.execPath, [cli, ...args], { cwd: consumer, encoding: "utf8" });
+
+it("reports the supported package version", () => {
+  const result = run(["--version"]);
+  expect(result.status).toBe(0);
+  expect(result.stdout).toBe("0.1.0\n");
+  expect(result.stderr).toBe("");
+});
+
+it("imports only the supported SDK surface without creating files", async () => {
+  const before = (await readdir(consumer, { recursive: true })).sort();
+  const result = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "--eval",
+      `import assert from "node:assert/strict";
+       import * as sdk from "abilitybench";
+       assert.deepEqual(Object.keys(sdk), [
+         "AbilityBenchError", "createWorkflow", "openHistory", "prepare", "stage",
+       ]);
+       for (const subpath of ["dist/execution.js", "legacy", "planning", "filesystem-store"]) {
+         await assert.rejects(import("abilitybench/" + subpath), {
+           code: "ERR_PACKAGE_PATH_NOT_EXPORTED",
+         });
+       }`,
+    ],
+    { cwd: consumer, encoding: "utf8" },
+  );
+  expect(result.stderr).toBe("");
+  expect(result.stdout).toBe("");
+  expect(result.status).toBe(0);
+  expect((await readdir(consumer, { recursive: true })).sort()).toEqual(before);
+});
+
 it("rejects deferred commands and invalid grammar with no partial stdout", () => {
   for (const args of [
     ["run"],
