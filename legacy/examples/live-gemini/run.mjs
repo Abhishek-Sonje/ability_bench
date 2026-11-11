@@ -22,11 +22,9 @@ import {
   Budget,
   buildWorkflow,
   createGeminiGenerator,
-  digest,
   GRAPH,
   outputFromSnapshot,
   PRICING,
-  PROTOCOL_CALLS,
   requestBody,
   retainedExposure,
   SETTINGS,
@@ -129,6 +127,11 @@ try {
     await mkdir(join(root, "prompts"), { recursive: true });
     await mkdir(join(root, "snapshots"));
     await copyFile(join(import.meta.dirname, "adapter.mjs"), join(root, "adapter.mjs"));
+    await copyFile(join(import.meta.dirname, "provider.mjs"), join(root, "provider.mjs"));
+    await copyFile(
+      new URL("../../src/canonical-json.ts", import.meta.url),
+      join(root, "canonical-json.ts"),
+    );
     await copyFile(join(import.meta.dirname, "grounding.mjs"), join(root, "grounding.mjs"));
     await writeFile(join(root, "catalog.json"), canonicalizeJson(syntheticCatalog));
     await writeFile(join(root, "settings.json"), canonicalizeJson(SETTINGS));

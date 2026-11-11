@@ -32,12 +32,14 @@ async function fixture(fastRetries = false, capUsd = 0.1, modelProfile = "flash"
     };
   `,
   );
-  for (const name of ["adapter.mjs", "run.mjs", "grounding.mjs"]) {
+  const canonical = pathToFileURL(resolve("src/canonical-json.ts")).href;
+  for (const name of ["adapter.mjs", "provider.mjs", "run.mjs", "grounding.mjs"]) {
     const source = await readFile(resolve("examples/live-gemini", name), "utf8");
     let imported = source
       .replace('"../../dist/index.js"', JSON.stringify(sdk))
+      .replace('"../../src/canonical-json.ts"', JSON.stringify(canonical))
       .replace("export const BUDGET_CAP_USD = 0.11;", `export const BUDGET_CAP_USD = ${capUsd};`);
-    if (modelProfile === "flash" && name === "adapter.mjs") {
+    if (modelProfile === "flash" && name === "provider.mjs") {
       imported = imported
         .replace('model: "gemini-3.5-flash-lite"', 'model: "gemini-3.8-flash"')
         .replace("inputPerMillion: 0.3,", "inputPerMillion: 0.75,")
@@ -47,7 +49,7 @@ async function fixture(fastRetries = false, capUsd = 0.1, modelProfile = "flash"
     if (name === "run.mjs") imported = `import "./mock-provider.mjs";\n${imported}`;
     await writeFile(
       join(root, name),
-      fastRetries && name === "adapter.mjs"
+      fastRetries && name === "provider.mjs"
         ? imported.replace("await delay(waitMs);", "await Promise.resolve();")
         : imported,
     );

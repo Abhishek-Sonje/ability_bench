@@ -101,7 +101,17 @@ it.each(["equal", "changed", "intermediate", "object-order", "array-order", "req
     );
     if (change !== "equal")
       expect(result.stages[1]?.actual.details).toMatchObject({ changedBindings: ["source"] });
-    expect((await openHistory(f.history).run(result.runId)).stages).toEqual(result.stages);
+    const history = openHistory(f.history);
+    expect((await history.run(result.runId)).stages).toEqual(result.stages);
+    if (change === "object-order" || change === "array-order") {
+      expect(await history.compare(first.runId, result.runId, "source")).toMatchObject({
+        equal: false,
+        difference:
+          change === "object-order"
+            ? { path: "", reason: "object_order" }
+            : { path: "/0", reason: "value" },
+      });
+    }
   },
 );
 it("diagnoses relative escapes and physical history aliases without invoking their callbacks", async () => {
@@ -313,12 +323,13 @@ it.each([false, true])("retains influence and artifact causes with refresh=%s", 
 it("reuses through retained chains without consulting ancestors and isolates mutable reused dependencies", async () => {
   const f = await fixture();
   let sourceCalls = 0;
+  const seen: string[] = [];
   const source = stage({
     id: "source",
     reuse: { revision: "v1" },
     run: () => {
       sourceCalls++;
-      return { list: [2, 1], z: 1, a: 2 };
+      return { "10": 10, list: [2, 1], z: 1, "2": 2, a: 2 };
     },
   });
   const left = stage({
@@ -332,7 +343,10 @@ it("reuses through retained chains without consulting ancestors and isolates mut
   const right = stage({
     id: "right",
     dependencies: { source },
-    run: ({ dependencies }) => dependencies.source,
+    run: ({ dependencies }) => {
+      seen.push(JSON.stringify(dependencies.source));
+      return dependencies.source;
+    },
   });
   const workflow = createWorkflow({ id: "chain", root: f.root, stages: [source, left, right] });
   const first = await (await prepare(workflow, { baseline: null })).execute();
@@ -340,10 +354,12 @@ it("reuses through retained chains without consulting ancestors and isolates mut
   await rm(join(f.history, "runs", `${first.runId}.json`));
   const third = await (await prepare(workflow, { baseline: { runId: second.runId } })).execute();
   expect(sourceCalls).toBe(1);
+  const ordered = '{"2":2,"10":10,"list":[2,1],"z":1,"a":2}';
+  expect(seen).toEqual([ordered, ordered, ordered]);
   expect(third.stages[0]?.output).toEqual(first.stages[0]?.output);
   const history = openHistory(f.history);
   expect(await history.output(third.runId, "left")).toMatchObject({ list: [1, 2] });
-  expect(await history.output(third.runId, "right")).toMatchObject({ list: [2, 1] });
+  expect(JSON.stringify(await history.output(third.runId, "right"))).toBe(ordered);
   const value = (await history.output(third.runId, "source")) as { list: number[] };
   value.list.reverse();
   expect(await history.output(third.runId, "source")).toMatchObject({ list: [2, 1] });
